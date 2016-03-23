@@ -1,0 +1,135 @@
+#!/usr/bin/env python
+
+#Created on Tue Nov 12 08:46:44 2013
+#@author: xwangan
+
+import numpy as np
+from optparse import OptionParser
+from datetime import datetime
+from realmd.mddos import MolecularDynamicsCoordinateVelocity
+from realmd.mddos.dos import DOS
+from realmd.mddos.settings import Settings
+from realmd.information import print_mddos, print_end, warning,program_exit,error
+
+
+# main part
+print_mddos(time=datetime.now())
+# parsing options
+parser = OptionParser()
+parser.set_defaults(file_format="lammps",
+                    step_range="",
+                    atom_type="",
+                    is_average_input=True,
+                    is_normalize=True,
+                    is_summation=True,
+                    is_smoothing=True,
+                    sample_length=500,
+                    correlation_length=400,
+                    time_step=1.0,
+                    smooth_tune=1.0,
+                    is_average_output=True,
+                    is_write_ac=False,
+                    is_convert_velocity=False,
+                    config_file=None,
+                    is_plot=False,
+                    is_save=False,
+                    out_filename="dos.csv")
+parser.add_option("--format","--file_format", dest="file_format",type="string",
+                  help='set input file mode from "lammps"(default),"xyz" and "vasp"')
+parser.add_option("--range", "--step_range", dest="step_range", type="string",
+                  help="extract only a range of timek steps from the original data, e.g. 1000:2000")
+parser.add_option("--md", dest="analyze_md",
+                  action="store_true",
+                  help="analyze the md results without doing further dos calculation")
+parser.add_option("--ms", "--mean_subtraction", dest="is_average_input",
+                  action="store_true",
+                  help="Force the average value of the series to be zero by subtracting each number with the mean value")
+parser.add_option("--normalize", dest="is_normalize",
+                  action="store_true",
+                  help="Normalization")
+parser.add_option("--smoothing", dest="is_smoothing",
+                  action="store_true",
+                  help="Gaussian smoothing for auto correlation data")
+parser.add_option("--tune","--smooth_tune_factor", dest="smooth_tune", type="float",
+                  help="tune factor for Gaussian smoothing. the larger this factor is, the smoother dos will be (default:1.0)")
+parser.add_option("--summation",dest="is_summation",
+                  action="store_true",
+                  help="summation over the 3 spacial dimensions")
+parser.add_option("--corl", "--correlation_length", dest="correlation_length", type="int",
+                  help="correlation frequency")
+parser.add_option("--time_step", dest="time_step", type="float",
+                  help="time step during MD calculation (fs)")
+parser.add_option("--sampl", "--sample_length",dest="sample_length", type="int",
+                  help="total number of steps for each correlation (larger than correlation length because of the redundancy)")
+parser.add_option("--ao", "--average_output", dest="is_average_output",
+                  action="store_true",
+                  help="Average among all the correlations")
+parser.add_option("--atom_type",dest="atom_type",type="string",
+                  help="specify atom types in the form of '0*4,1*16,2*4' ")
+parser.add_option("--wac","--write_auto_correlation",dest="is_write_ac",
+                  action="store_true",
+                  help="write auto correlation")
+parser.add_option("--v2h","--convert_velocity", dest="is_convert_velocity",
+                  action="store_true",
+                  help="convert original velocity to hdf5 file and save it on the disk")
+parser.add_option("-c",dest="config_file", type="string",
+                  help="configuration file")
+parser.add_option("-o","--output",dest="out_filename",type="string",
+                  help="output file name for the dos")
+parser.add_option("-p","--plot",dest="is_plot",
+                  action="store_true",
+                  help="plot density of states")
+parser.add_option("-s","--save",dest="is_save",
+                  action="store_true",
+                  help="save density of states plot as pdf file(s)")
+(options, args) = parser.parse_args()
+option_list=parser.option_list
+config_file=options.config_file
+settings=Settings(options, option_list, args, config_file)
+print "Start to split the file:%s"%settings.input_filename
+
+#Check if the file can be opened successfully    
+md=MolecularDynamicsCoordinateVelocity(step_range=settings.step_range)
+md_success=md.set_from_file(fileformat=settings.file_format,
+                            filename=settings.input_filename)
+if md_success ==0:
+    error("fail to read input file")
+md.print_information()
+
+if settings.atom_type==None:     
+    if len(np.unique(md.atom_types))==len(md.atom_types):
+        atom_type=np.ones(md.num_atom,dtype=int)
+    else:
+        atom_type=md.atom_types
+else:
+    if len(settings.atom_type)!=len(md.atom_types):
+        warning("number of atoms does not match\ntype of atoms in MD simulation will be used anyway!")
+        atom_type=np.ones(md.num_atom,dtype=int)
+    else:
+        atom_type=settings.atom_type
+
+if settings.is_convert_velocity:
+    md.save_cv_to_hdf5()
+
+if options.analyze_md:
+    print "MD file has been checked!"
+    program_exit(0)
+
+dos=DOS(md,
+        atom_types=atom_type,
+        is_ai=settings.is_average_input,
+        sample_l=settings.sample_length,
+        corr_l=settings.correlation_length,
+        smooth_tune=settings.smooth_tune,
+        time_step=settings.time_step,
+        is_sum=settings.is_summation,
+        is_wac=settings.is_write_ac,
+        is_sm = settings.is_smoothing,
+        is_normalize=settings.is_normalize,
+        out_file_name=settings.out_filename)
+dos.run_dos()
+
+if settings.is_plot or settings.is_save:
+    dos.plot(settings.is_plot,settings.is_save)
+
+print_end(time=datetime.now())

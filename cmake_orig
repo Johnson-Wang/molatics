@@ -1,0 +1,3 @@
+#!/bin/bash
+python csetup_orig.py build
+cp build/lib.linux-x86_64-2.7/mddos/_ac.so mddos/

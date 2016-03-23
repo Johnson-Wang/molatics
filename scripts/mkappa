@@ -1,0 +1,213 @@
+#!/usr/bin/env python
+
+#Created on Sunday, September 14, 2014
+#@author: xwangan
+
+import numpy as np
+from optparse import OptionParser
+from datetime import datetime
+from realmd.file_IO import get_volume_from_md_file, read_heat_flux
+from realmd.mdkappa import MolecularDynamicsForceEnergy
+from realmd.mdkappa.kappa import Kappa, Kappa_HF
+from realmd.mdkappa.settings import KappaSettings
+from realmd.information import  print_end, warning,program_exit,error
+from realmd.unit import Bohr2Angstrom
+
+def print_mdkappa(time=None):
+    "text generated at http://www.network-science.de/ascii/"
+    print """
+M   M DDD  K  K  AA  PPPP  PPPP   AA
+MM MM D  D K K  A  A P   P P   P A  A
+M M M D  D KK   AAAA PPPP  PPPP  AAAA
+M   M D  D K K  A  A P     P     A  A
+M   M DDD  K  K A  A P     P     A  A
+"""
+    if time:
+        print "Program begins at", str(time)
+
+
+
+# main part
+print_mdkappa(time=datetime.now())
+# parsing options
+parser = OptionParser()
+parser.set_defaults(temperature=300, #unit K
+                    file_format="xyz",
+                    step_range="",
+                    atom_type="",
+                    is_average_input=True,
+                    is_difference=False,
+                    is_normalize=True,
+                    is_summation=True,
+                    is_smoothing=False,
+                    sample_length=500,
+                    correlation_length=400,
+                    time_step=1.0,
+                    smooth_tune=1.0,
+                    direction_tensor=None,
+                    is_average_output=True,
+                    is_write_ac=False,
+                    is_convert_input=False,
+                    config_file=None,
+                    volume=None,
+                    is_plot=False,
+                    is_save=False,
+                    hf_filename=None,
+                    out_filename="dos.csv")
+parser.add_option("-t","--temperature", dest="temperature",type="float",
+                  help='The temperature for the md run')
+parser.add_option("-d", "--difference", dest="is_difference", action="store_true",
+                  help="If set, the heat flux is calculated through differentiating the product of r and E")
+parser.add_option("--format","--file_format", dest="file_format",type="string",
+                  help='set input file mode from "lammps"(default),"xyz" and "vasp"')
+parser.add_option("--range", "--step_range", dest="step_range", type="string",
+                  help="extract only a range of time steps from the original data, e.g. 1000:2000")
+parser.add_option("--md", dest="analyze_md",
+                  action="store_true",
+                  help="analyze the md results without doing further dos calculation")
+parser.add_option("--ms", "--mean_subtraction", dest="is_average_input",
+                  action="store_true",
+                  help="Force the average value of the series to be zero by subtracting each number with the mean value")
+parser.add_option("--normalize", dest="is_normalize",
+                  action="store_true",
+                  help="Normalization")
+parser.add_option("--smoothing", dest="is_smoothing",
+                  action="store_true",
+                  help="Gaussian smoothing for auto correlation data")
+parser.add_option("--tune","--smooth_tune_factor", dest="smooth_tune", type="float",
+                  help="tune factor for Gaussian smoothing. the larger this factor is, the smoother dos will be (default:1.0)")
+parser.add_option("--summation",dest="is_summation",
+                  action="store_true",
+                  help="summation over the 3 spacial dimensions")
+parser.add_option("--corl", "--correlation_length", dest="correlation_length", type="int",
+                  help="correlation frequency")
+parser.add_option("--time_step", dest="time_step", type="float",
+                  help="time step during MD calculation (fs)")
+parser.add_option("--sampl", "--sample_length",dest="sample_length", type="int",
+                  help="total number of steps for each correlation (larger than correlation length because of the redundancy)")
+parser.add_option("--ao", "--average_output", dest="is_average_output",
+                  action="store_true",
+                  help="Average among all the correlations")
+parser.add_option("--atom_type",dest="atom_type",type="string",
+                  help="specify atom types in the form of '0*4,1*16,2*4' ")
+parser.add_option("--dirt", "--direction_tensor", dest="direction_tensor",type="string",
+                  help="Direction tensor for the thermal conductivity calculation")
+parser.add_option("--wac","--write_auto_correlation",dest="is_write_ac",
+                  action="store_true",
+                  help="write auto correlation")
+parser.add_option("--f2h","--convert_input", dest="is_convert_input",
+                  action="store_true",
+                  help="convert original input fles including coordinate, velocity, force and energy to hdf5 file and save it on the disk")
+parser.add_option("-v","--volume",dest="volume", type="float",
+                  help="volume of the calculation domain (unit in Angstrom^3)")
+parser.add_option("-c",dest="config_file", type="string",
+                  help="configuration file")
+parser.add_option("-o","--output",dest="out_filename",type="string",
+                  help="output file name for the dos")
+parser.add_option("-p","--plot",dest="is_plot",
+                  action="store_true",
+                  help="plot density of states")
+parser.add_option("-s","--save",dest="is_save",
+                  action="store_true",
+                  help="save density of states plot as pdf file(s)")
+parser.add_option("--hf", "--heat_flux_filename", dest='hf_filename', type="string",
+                  help="The heat flux file which contain the information of heat flux")
+
+(options, args) = parser.parse_args()
+option_list=parser.option_list
+config_file=options.config_file
+settings=KappaSettings(options, option_list, args, config_file)
+
+if settings.volume is not None:
+    volume = settings.volume # unit in angstrom
+else:
+    volume_array = get_volume_from_md_file(filename=settings.md_input_filename)
+    if volume_array == None:
+        error("Please input the volume of the calculation domain or copy the md.out file to the local directory")
+    volume = np.average(volume_array) * Bohr2Angstrom ** 3
+
+if settings.hf_filename is None:
+    if settings.input_filename == None:
+        warning("The coordinate_and_velocity file is set default as geo_end.xyz")
+        cv_input = "geo_end.xyz"
+    else:
+        cv_input = settings.input_filename
+
+    if settings.fe_input_filename == None:
+        if settings.input_filename == None:
+            fe_input = "heat_flux.out"
+        else:
+            fe_input = settings.input_filename
+    else:
+        fe_input = settings.fe_input_filename
+    print "Start to split the files:%s and %s"%(cv_input, fe_input)
+
+    #Check if the file can be opened successfully
+    md=MolecularDynamicsForceEnergy(step_range=settings.step_range)
+    md_success=md._set_from_file(fileformat=settings.file_format,
+                                cv_filename=cv_input,
+                                fe_filename=fe_input)
+    if md_success ==0:
+        error("fail to read input file")
+    md.print_information()
+    if settings.atom_type==None:
+        if len(np.unique(md.atom_types))==len(md.atom_types):
+            atom_type=np.ones(md.num_atom,dtype=int)
+        else:
+            atom_type=md.atom_types
+    else:
+        if len(settings.atom_type)!=len(md.atom_types):
+            warning("number of atoms does not match\ntype of atoms in MD simulation will be used anyway!")
+            atom_type=np.ones(md.num_atom,dtype=int)
+        else:
+            atom_type=settings.atom_type
+    if settings.is_convert_input:
+        md.save_fe_to_hdf5()
+
+    if options.analyze_md:
+        print "MD file has been checked!"
+        program_exit(0)
+
+    kappa=Kappa(md,
+            temperature=settings.temperature,
+            volume=volume,
+            is_ai=settings.is_average_input,
+            sample_l=settings.sample_length,
+            corr_l=settings.correlation_length,
+            smooth_tune=settings.smooth_tune,
+            time_step=settings.time_step,
+            is_diff=settings.is_difference,
+            is_sum=settings.is_summation,
+            is_wac=settings.is_write_ac,
+            is_sm = settings.is_smoothing,
+            is_normalize=settings.is_normalize,
+            dirt = settings.direction_tensor,
+            out_file_name=settings.out_filename)
+else:
+    heat_flux, step_indices = read_heat_flux(format=settings.file_format,
+                                            filename=settings.hf_filename,
+                                            step_range=settings.step_range)
+    # heat_flux = np.cumsum(heat_flux, axis=0) / np.arange(1, len(heat_flux) +1).repeat(3).reshape(-1,3)
+    if settings.file_format == "l":
+        heat_flux *= volume
+    kappa = Kappa_HF(heat_flux = heat_flux,
+                     step_indices = step_indices,
+                     temperature=settings.temperature,
+                     volume=volume,
+                     is_ai=settings.is_average_input,
+                     sample_l=settings.sample_length,
+                     corr_l=settings.correlation_length,
+                     smooth_tune=settings.smooth_tune,
+                     time_step=settings.time_step,
+                     is_diff=settings.is_difference,
+                     is_sum=settings.is_summation,
+                     is_wac=settings.is_write_ac,
+                     is_sm = settings.is_smoothing,
+                     is_normalize=settings.is_normalize,
+                     dirt = settings.direction_tensor,
+                     out_file_name=settings.out_filename)
+kappa.run_kappa()
+kappa.plot_time(is_plot=settings.is_plot, is_save=settings.is_save)
+#kappa.fourier_transform()
+#kappa.plot_freq()
+print_end(time=datetime.now())

@@ -1,0 +1,15 @@
+__author__ = 'xinjiang'
+EV = 1.60217733E-19 # J
+Angstrom = 1E-10 # m
+fs = 1e-15 # s
+ps = 1e-12 # s
+THz = 1 / ps #1e12
+fs2ps = 1e-3
+Bohr = 5.29177249E-11 #m
+bar = 1e5 #pa N/m^2
+Bohr2Angstrom = Bohr / Angstrom
+au_force = 51.422060 #eV/Angstrom
+au_energy = 27.2113845 # eV
+au_velocity = 21876.914212123513 # Angstrom / ps
+kb_J = 1.38060504e-23 # [J/K]
+kb = kb_J / EV # [eV] 8.6173383e-5

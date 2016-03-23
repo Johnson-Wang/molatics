@@ -1,0 +1,320 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2014 Wang Xinjiang
+# All rights reserved.
+
+
+import os
+from optparse import OptionParser
+
+from phonopy import *
+from phonopy.interface import vasp
+
+from mdfc import MolecularDynamicsForceConstant as MDFC
+from mdfc.settings import ConfParser
+from realmd.mdkappa import MolecularDynamicsForceEnergy as MDFE
+
+mdfc_version = "1.3"
+
+# AA is created at http://www.network-science.de/ascii/.
+def print_mdfc():
+    print """        _
+ __  __ ____  _____ ____
+|  \/  |  _ \|  ___/ ___|
+| |\/| | | | | |_ | |
+| |  | | |_| |  _|| |___
+|_|  |_|____/|_|   \____|
+"""
+
+def print_version(version):
+    print " " * 24, version
+    print ""
+
+def print_end():
+    print """                 _
+   ___ _ __   __| |
+  / _ \ '_ \ / _` |
+ |  __/ | | | (_| |
+  \___|_| |_|\__,_|
+"""
+
+def print_error():
+    print """  ___ _ __ _ __ ___  _ __
+ / _ \ '__| '__/ _ \| '__|
+|  __/ |  | | | (_) | |
+ \___|_|  |_|  \___/|_|
+"""
+
+def print_attention(attention_text):
+    print "*******************************************************************"
+    print attention_text
+    print "*******************************************************************"
+    print ""
+
+def print_error_message(message):
+    print
+    print message
+    print_error()
+
+def file_exists(filename, log_level):
+    if os.path.exists(filename):
+        return True
+    else:
+        error_text = "%s not found." % filename
+        print_error_message(error_text)
+        if log_level > 0:
+            print_error()
+        sys.exit(1)
+
+#################
+# Parse options #
+#################
+
+parser = OptionParser()
+parser.set_defaults(
+    interface = None,
+    cutoff_pair=None,
+    cutoff_triplet=None,
+    cutoff_disp="", # A. cutoff displacement distance, data above this cutoff is ignored in predicting new positions
+    predict_count=1,
+    is_fold_check = False,
+    is_fc3=False,
+    factor=None,
+    is_fc2=False,
+    is_graph_plot=False,
+    is_graph_save=False,
+    is_hdf5=False,
+    is_legend=False,
+    is_nosym=False,
+    is_wien2k_p1=False,
+    is_rotational=False,
+    is_translational=False,
+    is_weighted=True,
+    loglevel=None,
+    primitive_axis=None,
+    quiet=False,
+    supercell_dimension=None,
+    symprec=1e-5,
+    cutrf=1e-3,
+    temperature=None,
+    cell_poscar=None,
+    force_filename = None,
+    coord_filename=None,
+    file_format='h',
+    step_range="",
+    is_convert_input=False,
+    divide=1,
+    verbose=False)
+
+parser.add_option("-c", "--cell", dest="cell_poscar",
+                  action="store", type="string",
+                  help="Read unit cell", metavar="FILE")
+parser.add_option("--count", dest="predict_count",type="int",
+                  help="The number of times for searching the equilibrium structure")
+parser.add_option("--interface", dest="interface",
+                  action="store", type="string",
+                  help="The interface of input and output files")
+parser.add_option("--cp", "--cutoff_pair", dest="cutoff_pair", type="string",
+                  help="Set the cutoff distance between a pair of atoms for fc2 (of the same of different species)")
+parser.add_option("--ct", "--cutoff_triplet", dest="cutoff_triplet", type="string",
+                  help="Set the cutoff distance amongst a triplet of atoms for fc3 (of the same of different species)")
+parser.add_option("--cd", "--cutoff_disp", dest="cutoff_disp", type="string",
+                  help="Set the cutoff distance for the displacements. Data above the cutoff is ignored in predicting new equilibrium positions")
+parser.add_option("--dim", dest="supercell_dimension",
+                  action="store", type="string",
+                  help="Same behavior as DIM tag")
+parser.add_option("--factor", dest="factor", type="float",
+                  help="Conversion factor to the default force unit (eV/A)")
+parser.add_option("--fc2", dest="is_fc2",
+                  action="store_true",
+                  help="Calculate harmonic force constants")
+parser.add_option("--hdf5", dest="is_hdf5", action="store_true",
+                  help="Use hdf5 for force constants")
+parser.add_option("--fc3", dest="is_fc3", action="store_true",
+                  help="Calculate the 3rd order interatomic force constants")
+parser.add_option("--f2h","--convert_input", dest="is_convert_input",
+                  action="store_true",
+                  help="convert original input fles including coordinate, velocity, force and energy to hdf5 file and save it on the disk")
+parser.add_option("--legend", dest="is_legend",
+                  action="store_true",
+                  help="Legend of plots is shown in thermal displacements")
+parser.add_option("--loglevel", dest="loglevel", type="int",
+                  help="Log level")
+parser.add_option("--cutrf", "--cutoff_residual_force", dest="cutrf", type="float",
+                  help="The cutoff residual force in predicting the equilibrium position")
+parser.add_option("--nosym", dest="is_nosym",
+                  action="store_true",
+                  help="Symmetry is not imposed.")
+parser.add_option("-p", "--plot", dest="is_graph_plot",
+                  action="store_true",
+                  help="Plot data")
+parser.add_option("--fcheck",'--fold_check', dest="is_fold_check",
+                  action="store_true",
+                  help="Check if coordinates are folded")
+parser.add_option("--weighted", dest="is_weighted",
+                  action="store_true",
+                  help="The force constants are weighted based on the non-weighted results")
+parser.add_option("--pa", "--primitive_axis", dest="primitive_axis",
+                  action="store", type="string",
+                  help="Same as PRIMITIVE_AXIS tag")
+parser.add_option("-q", "--quiet", dest="quiet",
+                  action="store_true",
+                  help="Print out smallest information")
+parser.add_option("-s", "--save", dest="is_graph_save",
+                  action="store_true",
+                  help="Save plot data in pdf")
+parser.add_option("-t","--temperature", dest="temperature", type="string",
+                  help="The temperature for MD run")
+parser.add_option("--qpoints", dest="qpoints", type="string",
+                  help="Calculate at specified q-points")
+parser.add_option("--tolerance", dest="symprec", type="float",
+                  help="Symmetry tolerance to search")
+parser.add_option("-v", "--verbose", dest="verbose",
+                  action="store_true",
+                  help="Detailed information is shown.")
+parser.add_option("--ri", dest="is_rotational",
+                  action="store_true",
+                  help="Enforce rotational invariance")
+parser.add_option("--ti", dest="is_translational",
+                  action="store_true",
+                  help="Enforce translational invariance")
+parser.add_option("-f", "--ff", "--force_file", dest='force_filename', type="string",
+                  help="The force file which contain the information of atomic forces")
+parser.add_option("-i", "--cf", "--coordinate_filename", dest='coord_filename', type="string",
+                  help="The coordinate file which contain the information of positions of atoms")
+parser.add_option("--format","--file_format", dest="file_format",type="string",
+                  help='set input file mode from "lammps"(default),"xyz" and "vasp"')
+parser.add_option("--range", "--step_range", dest="step_range", type="string",
+                  help="extract only a range of time steps from the original data, e.g. 1000:2000")
+parser.add_option("-d","--divide",dest="divide", type="int",
+                  help="The number of segments after dividing the total chunk of data")
+(options, args) = parser.parse_args()
+option_list = parser.option_list
+
+# Error
+no_error = True
+
+# Set log level
+log_level = 1
+if options.verbose:
+    log_level = 2
+if options.quiet:
+    log_level = 0
+
+if not options.loglevel==None:
+    log_level=options.loglevel
+
+# Show title
+if log_level > 0:
+    print_mdfc()
+    print_version(mdfc_version)
+
+if len(args) > 0:
+    file_exists(args[0])
+    mdfc_conf = ConfParser(filename=args[0],
+                              options=options,
+                              option_list=option_list)
+    settings = mdfc_conf.get_settings()
+else:
+    mdfc_conf = ConfParser(options=options,
+                           option_list=option_list)
+    settings = mdfc_conf.get_settings()
+
+
+###########################
+# Parse crystal structure #
+###########################
+
+# POSCAR
+#The Relaxed structure at 0K should be given in the format of vasp (i.e. POSCAR)
+
+if options.cell_poscar == None:
+    file_exists("POSCAR", log_level)
+    unitcell_filename = 'POSCAR'
+else:
+    file_exists(options.cell_poscar, log_level)
+    unitcell_filename = options.cell_poscar
+unitcell = vasp.read_vasp(unitcell_filename)
+
+
+# Quick check of the structure
+if np.linalg.det(unitcell.get_cell()) < 0.0:
+    print_error_message('Determinant of the lattice vector matrix has to be positive.')
+    if log_level > 0:
+        print_end()
+    sys.exit(0)
+
+if settings.get_is_convert_input():
+    if log_level:
+        print "------------------------------- Converting input file format ---------------------------------"
+    md = MDFE(step_range=settings.get_step_range())
+    md._set_from_file(fileformat=settings.get_file_format(),
+                      cv_filename=settings.get_coord_filename(),
+                      fe_filename=settings.get_force_filename())
+    md.save_cv_to_hdf5()
+    md.save_fe_to_hdf5()
+    print_end()
+    sys.exit(0)
+# Coordinates, and forces
+# Physical units: energy, distance,   atomic mass
+# vasp          : eV,     Angstrom,   AMU
+
+# --factor: force unit factor
+if options.factor is not None:
+    factor = options.factor
+else:
+    factor = 1
+
+mdfc = MDFC(unitcell,
+          settings.get_supercell_matrix(),
+          factor=factor,
+          symprec=options.symprec,
+          cutoff_pair=settings.get_cutoff_pair(),
+          cutoff_triplet=settings.get_cutoff_triplet(),
+          cutoff_force=settings.get_cutoff_residual_force(),
+          cutoff_disp=settings.get_cutoff_disp(),
+          is_symmetry=settings.get_is_symmetry(),
+          divide=settings.get_divide(),
+          count=settings.get_predict_coun(),
+          is_translational_invariance=settings.get_is_translational_invariance(),
+          is_rotational_invariance=settings.get_is_rotational_invariance(),
+          is_weighted=settings.get_is_weighted(),
+          log_level=log_level)
+
+if log_level:
+    print "------------------------------- Reading MD information-----------------------------------------------"
+md = MDFE(step_range=settings.get_step_range())
+md._set_from_file(fileformat=settings.get_file_format(),
+                  cv_filename=settings.get_coord_filename(),
+                  fe_filename=settings.get_force_filename())
+
+if options.is_fold_check:
+    print "The coordinate folding is being checked.."
+    for i in range(len(md.atom_coordinates)):
+        from copy import deepcopy
+        sa = deepcopy(mdfc.supercell)
+        sa.set_positions(md.atom_coordinates[i])
+        coord = sa.get_scaled_positions()
+        is_out = np.abs(coord - mdfc.supercell.get_scaled_positions()) > 0.5
+        coord -= is_out * np.sign(coord - mdfc.supercell.get_scaled_positions())
+        sa.set_scaled_positions(coord)
+        md.atom_coordinates[i] = sa.get_positions()
+
+if md.atom_forces == None:
+    print_error_message("Force information not found! Exiting")
+    sys.exit(1)
+if log_level:
+    print "-------------------------------Calculating Force Constants------------------------------------------"
+mdfc.init_disp_and_forces(coordinates = md.atom_coordinates, forces = md.atom_forces)
+
+if settings.get_is_fc2():
+    mdfc.run_fc2()
+if settings.get_is_fc3():
+    mdfc.run_fc3()
+
+
+if log_level > 0:
+    if no_error:
+        print_end()
+    else:
+        print_error()
