@@ -24,7 +24,6 @@ class Settings:
         self._is_tensor_symmetry = False
         self._is_translational_invariance = False
         self._is_rotational_invariance = False
-        self._is_weighted = False
         self._is_symmetry = True
         self._primitive_matrix = np.eye(3, dtype=float)
         self._run_mode = None
@@ -33,16 +32,20 @@ class Settings:
         self._cutoff_triplet = None
         self._cutoff_disp = None
         self._supercell_matrix = None
+        self._supercell_matrix_orig = None
         self._is_time_symmetry = True
         self._is_hdf5 = False
         self._is_fc3 = False
         self._is_fc2 = False
+        self._read_fc2 = None
+        self._read_fc3 = None
         self._t = 300
         self._cutoff_residual_force = 1e-8 #eV/A^2
+        self._precision = 1e-8
         self._predict_count = 1
         self._interface = "dftb"
         self._step_range=slice(None)
-        self._file_format="h"
+        self._file_format="x"
         self._coord_filename = "geo_end.xyz"
         self._force_filename = 'heat_flux.out'
         self._is_convert_input = False
@@ -59,6 +62,12 @@ class Settings:
 
     def get_supercell_matrix(self):
         return self._supercell_matrix
+
+    def set_supercell_matrix_orig(self, matrix):
+        self._supercell_matrix_orig = matrix
+
+    def get_supercell_matrix_orig(self):
+        return self._supercell_matrix_orig
 
     def set_time_symmetry(self, time_symmetry=True):
         self._is_time_symmetry = time_symmetry
@@ -90,17 +99,23 @@ class Settings:
     def get_is_fc2(self):
         return self._is_fc2
 
+    def set_read_fc3(self, read_fc3):
+        self._read_fc3 = read_fc3
+
+    def get_read_fc3(self):
+        return self._read_fc3
+
+    def set_read_fc2(self, read_fc2):
+        self._read_fc2 = read_fc2
+
+    def get_read_fc2(self):
+        return self._read_fc2
+
     def set_is_translational_invariance(self, is_translational_invariance):
         self._is_translational_invariance = is_translational_invariance
 
     def get_is_translational_invariance(self):
         return self._is_translational_invariance
-
-    def set_is_weighted(self, is_weighted):
-        self._is_weighted = is_weighted
-
-    def get_is_weighted(self):
-        return self._is_weighted
 
     def set_is_rotational_invariance(self, is_rotational_invariance):
         self._is_rotational_invariance = is_rotational_invariance
@@ -125,6 +140,12 @@ class Settings:
 
     def get_cutoff_residual_force(self):
         return self._cutoff_residual_force
+
+    def set_precision(self, precision):
+        self._precision = precision
+
+    def get_precision(self):
+        return self._precision
 
     def set_predict_count(self, predict_coun):
         self._predict_count = predict_coun
@@ -238,6 +259,9 @@ class ConfParser:
         if params.has_key('supercell_matrix'):
             self._settings.set_supercell_matrix(params['supercell_matrix'])
 
+        if params.has_key('supercell_matrix_orig'):
+            self._settings.set_supercell_matrix_orig(params['supercell_matrix_orig'])
+
         # Is crystal symmetry searched?
         if params.has_key('is_symmetry'):
             self._settings.set_is_symmetry(params['is_symmetry'])
@@ -246,11 +270,6 @@ class ConfParser:
         if params.has_key('is_translational'):
             self._settings.set_is_translational_invariance(
                 params['is_translational'])
-
-        # Is weighted in calculating FCs ?
-        if params.has_key('is_weighted'):
-            self._settings.set_is_weighted(
-                params['is_weighted'])
 
         # Is rotational invariance ?
         if params.has_key('is_rotational'):
@@ -265,6 +284,9 @@ class ConfParser:
 
         if params.has_key('cutoff_residual_force'):
             self._settings.set_cutoff_residual_force(params['cutoff_residual_force'])
+
+        if params.has_key('precision'):
+            self._settings.set_precision(params['precision'])
 
         if params.has_key('cutoff_radius'):
             self._settings.set_cutoff_radius(params['cutoff_radius'])
@@ -289,6 +311,12 @@ class ConfParser:
 
         if params.has_key('is_fc2'):
             self._settings.set_is_fc2(params['is_fc2'])
+
+        if params.has_key('read_fc3'):
+            self._settings.set_read_fc3(params['read_fc3'])
+
+        if params.has_key('read_fc2'):
+            self._settings.set_read_fc2(params['read_fc2'])
 
         if params.has_key('step_range'):
             self._settings.set_step_range(params['step_range'])
@@ -350,6 +378,10 @@ class ConfParser:
                 if self._options.supercell_dimension:
                     self._confs['dim'] = self._options.supercell_dimension
 
+            if opt.dest == 'supercell_dimension_orig':
+                if self._options.supercell_dimension_orig:
+                    self._confs['rdim'] = self._options.supercell_dimension_orig
+
             if opt.dest == 'is_nosym':
                 if self._options.is_nosym:
                     self._confs['symmetry'] = '.false.'
@@ -366,10 +398,6 @@ class ConfParser:
                 if self._options.cutoff_pair:
                     self._confs['cutoff_pair'] = self._options.cutoff_pair
 
-            if opt.dest == 'cutoff_triplet':
-                if self._options.cutoff_triplet:
-                    self._confs['cutoff_triplet'] = self._options.cutoff_triplet
-
             if opt.dest == 'cutoff_disp':
                 if self._options.cutoff_disp:
                     self._confs['cutoff_disp'] = self._options.cutoff_disp
@@ -381,10 +409,6 @@ class ConfParser:
             if opt.dest == 'is_translational':
                 if self._options.is_translational:
                     self._confs['is_translational'] = '.true.'
-
-            if opt.dest == 'is_weighted':
-                if self._options.is_weighted:
-                    self._confs['is_weighted'] = '.true.'
 
             if opt.dest == 'interface':
                 if self._options.interface:
@@ -401,6 +425,14 @@ class ConfParser:
             if opt.dest == 'is_fc2':
                 if self._options.is_fc2:
                     self._confs['is_fc2'] = '.true.'
+
+            if opt.dest == 'read_fc2':
+                if self._options.read_fc2:
+                    self._confs['read_fc2'] = self._options.read_fc2
+
+            if opt.dest == 'read_fc3':
+                if self._options.read_fc3:
+                    self._confs['read_fc3'] = self._options.read_fc3
 
             if opt.dest=="step_range":
                 ran=self._options.step_range.strip(" \'\"")
@@ -423,7 +455,10 @@ class ConfParser:
                 self._confs["divide"]=int(self._options.divide)
 
             if opt.dest=="cutoff_residual_force":
-                self._confs["cutoff_residual_force"]=int(self._options.cutoff_residual_force)
+                self._confs["cutoff_residual_force"]=float(self._options.cutoff_residual_force)
+
+            if opt.dest=="precision":
+                self._confs["precision"]=float(self._options.precision)
 
             if opt.dest=="predict_count":
                 self._confs["predict_count"]=int(self._options.predict_count)
@@ -448,6 +483,23 @@ class ConfParser:
                             'Determinant of supercell matrix has to be positive.')
                     else:
                         self.set_parameter('supercell_matrix', matrix)
+
+            if conf_key == 'rdim':
+                matrix = [int(x) for x in confs['rdim'].split()]
+                if len(matrix) == 9:
+                    matrix = np.array(matrix).reshape(3, 3)
+                elif len(matrix) == 3:
+                    matrix = np.diag(matrix)
+                else:
+                    self.setting_error(
+                        "Number of elements of DIM tag has to be 3 or 9.")
+
+                if matrix.shape == (3, 3):
+                    if np.linalg.det(matrix) < 1:
+                        self.setting_error(
+                            'Determinant of supercell matrix has to be positive.')
+                    else:
+                        self.set_parameter('supercell_matrix_orig', matrix)
 
             if conf_key == 'primitive_axis':
                 if not len(confs['primitive_axis'].split()) == 9:
@@ -474,10 +526,6 @@ class ConfParser:
             if conf_key == 'is_rotational':
                 if confs['is_rotational'] == ".true.":
                     self.set_parameter('is_rotational', True)
-
-            if conf_key == 'is_weighted':
-                if confs['is_weighted'] == ".true.":
-                    self.set_parameter('is_weighted',True)
 
             if conf_key == 'tensor_symmetry':
                 if confs['tensor_symmetry'] == '.true.':
@@ -516,6 +564,10 @@ class ConfParser:
                 val = float(confs['cutoff_residual_force'])
                 self.set_parameter('cutoff_residual_force', val)
 
+            if conf_key == 'precision':
+                val = float(confs['precision'])
+                self.set_parameter('precision', val)
+
             if conf_key == 'interface':
                 val = float(confs['interface'])
                 self.set_parameter('interface', val)
@@ -531,6 +583,12 @@ class ConfParser:
             if conf_key == 'is_fc2':
                 if confs['is_fc2'] == '.true.':
                     self.set_parameter('is_fc2', True)
+
+            if conf_key == 'read_fc2':
+                self.set_parameter('read_fc2', confs['read_fc2'])
+
+            if conf_key == 'read_fc3':
+                self.set_parameter('read_fc3', confs['read_fc3'])
 
             if conf_key == "step_range":
                 ran=confs["step_range"]
@@ -567,7 +625,7 @@ class ConfParser:
 
     def parameter_coupling(self):
         parameters = self._parameters
-        if parameters["file_format"] is None:
+        if parameters.has_key("coord_filename") and parameters.has_key("file_format"):
             coord_filename = parameters['coord_filename']
             file_format = parameters['file_format']
             if coord_filename is not None:
@@ -579,29 +637,8 @@ class ConfParser:
                     if file_format != "h":
                         warning("hdf5 file format detected, format converted forcibly!")
                         self.set_parameter('file_format', 'h')
-                elif coord_filename == "XDATCAR" or coord_filename == "vasprun.xml":
+                elif coord_filename == "XDATCAR":
                     if file_format != "v":
                         warning("vasp file format detected, format converted forcibly!")
                         self.set_parameter('file_format', "v")
-            else:
-                print "Error! The position files and format are both not assigned"
-                sys.exit(1)
-
-        if parameters['file_format'] is not None:
-            if parameters['file_format'] == "v":
-                if parameters['coord_filename'] is None:
-                    warning("Warning:Position file not assigned (default: vasprun.xml)")
-                    self.set_parameter('coord_filename', 'vasprun.xml')
-                if parameters['force_filename'] is None:
-                    warning("Warning:Force file not assigned (default: vasprun.xml)")
-                    self.set_parameter('force_filename', 'vasprun.xml')
-            if parameters['file_format'] == "h":
-                if parameters['coord_filename'] is None:
-                    warning("Warning:Position file not assigned (default: md_cv.hdf5)")
-                    self.set_parameter('coord_filename', 'md_cv.hdf5')
-                if parameters['force_filename'] is None:
-                    warning("Warning:Force file not assigned (default: md_fe.hdf5)")
-                    self.set_parameter('force_filename', 'md_fe.hdf5')
-
-
 

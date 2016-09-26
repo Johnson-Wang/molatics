@@ -11,6 +11,8 @@ from phonopy import *
 from phonopy.interface import vasp
 
 from mdfc import MolecularDynamicsForceConstant as MDFC
+from mdfc.fc3 import show_drift_fc3
+from mdfc.fc2 import show_drift_force_constants, show_rotational_invariance
 from mdfc.settings import ConfParser
 from realmd.mdkappa import MolecularDynamicsForceEnergy as MDFE
 
@@ -73,9 +75,12 @@ def file_exists(filename, log_level):
 parser = OptionParser()
 parser.set_defaults(
     interface = None,
+    cutoff_radius=None,
     cutoff_pair=None,
     cutoff_triplet=None,
     cutoff_disp="", # A. cutoff displacement distance, data above this cutoff is ignored in predicting new positions
+    read_fc2 = None,
+    read_fc3 = None,
     predict_count=1,
     is_fold_check = False,
     is_fc3=False,
@@ -89,18 +94,19 @@ parser.set_defaults(
     is_wien2k_p1=False,
     is_rotational=False,
     is_translational=False,
-    is_weighted=True,
+    precision=1e-6,
     loglevel=None,
     primitive_axis=None,
     quiet=False,
     supercell_dimension=None,
+    supercell_dimension_orig=None,
     symprec=1e-5,
     cutrf=1e-3,
     temperature=None,
     cell_poscar=None,
     force_filename = None,
     coord_filename=None,
-    file_format='h',
+    file_format="x",
     step_range="",
     is_convert_input=False,
     divide=1,
@@ -114,6 +120,8 @@ parser.add_option("--count", dest="predict_count",type="int",
 parser.add_option("--interface", dest="interface",
                   action="store", type="string",
                   help="The interface of input and output files")
+parser.add_option("--cr", "--cutoff_radius", dest="cutoff_radius", type="string",
+                  help="Out of cutoff radius, force constants are set zero.")
 parser.add_option("--cp", "--cutoff_pair", dest="cutoff_pair", type="string",
                   help="Set the cutoff distance between a pair of atoms for fc2 (of the same of different species)")
 parser.add_option("--ct", "--cutoff_triplet", dest="cutoff_triplet", type="string",
@@ -123,11 +131,20 @@ parser.add_option("--cd", "--cutoff_disp", dest="cutoff_disp", type="string",
 parser.add_option("--dim", dest="supercell_dimension",
                   action="store", type="string",
                   help="Same behavior as DIM tag")
+parser.add_option("--rdim", "--dim_orig", dest="supercell_dimension_orig",
+                  action="store", type="string",
+                  help="The read dimension (original dimension of force constants). Same behavior as RDIM tag")
 parser.add_option("--factor", dest="factor", type="float",
                   help="Conversion factor to the default force unit (eV/A)")
 parser.add_option("--fc2", dest="is_fc2",
                   action="store_true",
                   help="Calculate harmonic force constants")
+parser.add_option("--readfc2", dest="read_fc2",
+                  action="store", type='string',
+                  help="Read 2nd force constants and tune the elements to satisfy physical (symmetry) conditions")
+parser.add_option("--readfc3", dest="read_fc3",
+                  action="store", type='string',
+                  help="Read 3nd force constants and tune the elements to satisfy physical (symmetry) conditions")
 parser.add_option("--hdf5", dest="is_hdf5", action="store_true",
                   help="Use hdf5 for force constants")
 parser.add_option("--fc3", dest="is_fc3", action="store_true",
@@ -140,6 +157,8 @@ parser.add_option("--legend", dest="is_legend",
                   help="Legend of plots is shown in thermal displacements")
 parser.add_option("--loglevel", dest="loglevel", type="int",
                   help="Log level")
+parser.add_option("--precision", dest="precision", type="float",
+                  help="The precision used in Gaussian elimination ")
 parser.add_option("--cutrf", "--cutoff_residual_force", dest="cutrf", type="float",
                   help="The cutoff residual force in predicting the equilibrium position")
 parser.add_option("--nosym", dest="is_nosym",
@@ -151,9 +170,6 @@ parser.add_option("-p", "--plot", dest="is_graph_plot",
 parser.add_option("--fcheck",'--fold_check', dest="is_fold_check",
                   action="store_true",
                   help="Check if coordinates are folded")
-parser.add_option("--weighted", dest="is_weighted",
-                  action="store_true",
-                  help="The force constants are weighted based on the non-weighted results")
 parser.add_option("--pa", "--primitive_axis", dest="primitive_axis",
                   action="store", type="string",
                   help="Same as PRIMITIVE_AXIS tag")
@@ -269,6 +285,7 @@ mdfc = MDFC(unitcell,
           settings.get_supercell_matrix(),
           factor=factor,
           symprec=options.symprec,
+          cutoff_radius=settings.get_cutoff_radius(),
           cutoff_pair=settings.get_cutoff_pair(),
           cutoff_triplet=settings.get_cutoff_triplet(),
           cutoff_force=settings.get_cutoff_residual_force(),
@@ -278,8 +295,52 @@ mdfc = MDFC(unitcell,
           count=settings.get_predict_coun(),
           is_translational_invariance=settings.get_is_translational_invariance(),
           is_rotational_invariance=settings.get_is_rotational_invariance(),
-          is_weighted=settings.get_is_weighted(),
-          log_level=log_level)
+          precision=settings.get_precision(),
+          log_level=log_level,
+          is_hdf5=settings.get_is_hdf5())
+
+
+
+if settings.get_read_fc2() is not None:
+    print "##########%s is read and tunned to satisfy symmetry conditions#############" %settings.get_read_fc2()
+    fc = mdfc.fc
+    if settings.get_supercell_matrix_orig() is not None:
+        if not np.all(np.array(settings.get_supercell_matrix_orig()) <= np.array(settings.get_supercell_matrix)):
+            print_error_message("The output dimension should not be less than the original one!")
+    fc.set_fc2_read(settings.get_read_fc2(), rdim=settings.get_supercell_matrix_orig())
+    print "##########Checking the invariance conditions for the given force constants#############"
+    show_drift_force_constants(fc.get_fc2_read())
+    show_rotational_invariance(fc.get_fc2_read(), supercell=mdfc.supercell)
+    algo = 1
+    if algo == 1:
+        fc.set_fc2_irreducible_elements(is_trans_inv=settings.get_is_translational_invariance(),
+                                        is_rot_inv=settings.get_is_rotational_invariance())
+        # fc.set_expand_fc2_conditions()
+        fc.tune_fc2()
+    else:
+        fc.set_fc2_irreducible_elements()
+        fc.set_translational_rotational_invariance()
+    print "##########Checking the invariance conditions for the tuned force constants#############"
+    show_drift_force_constants(fc.get_fc2())
+    show_rotational_invariance(fc.get_fc2(), supercell=mdfc.supercell)
+
+    if settings.get_read_fc3() is None:
+        print_end()
+        sys.exit(0)
+
+if settings.get_read_fc3() is not None:
+    print "##########%s is read and tunned to satisfy symmetry conditions#############" %settings.get_read_fc3()
+
+    fc = mdfc.fc
+    fc.set_fc3_read(settings.get_read_fc3())
+    show_drift_fc3(fc._fc3_read)
+    fc.set_fc3_irreducible_components(is_trans_inv=settings.get_is_translational_invariance(),
+                                      is_rot_inv=settings.get_is_rotational_invariance())
+    fc.tune_fc3()
+    show_drift_fc3(fc._fc3)
+    print_end()
+    sys.exit(0)
+
 
 if log_level:
     print "------------------------------- Reading MD information-----------------------------------------------"

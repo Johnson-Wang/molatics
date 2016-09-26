@@ -8,7 +8,6 @@ int permute3[6][3] = {{0, 1, 2},{0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 
 
 F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
                                     const Triplet *triplets,
-				    const char *included,
                                     const VecDBL *positions,
                                     const Symmetry *symmetry1,
                                     const VecArbiLenINT *mappings1,
@@ -35,10 +34,9 @@ F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
   VecArbiLenINT *NIndependent = alloc_VecArbiLenINT(triplets->size);
   MatArbiLenINT *IndexIndependent = alloc_MatArbiLenINT(triplets->size, 27);
   MatArbiLenDBL *CC= alloc_MatArbiLenDBL(LEN, 27);
-  
   int atom1, atom2, atom3, atom1_0, atom2_0, atom3_0, atom1_1, atom2_1, atom3_1, atom2_2, atom3_2;
   int num_unique1, num_unique2;
-  int itriplet, ipermute, i, j, k, l, m, index1, index2;
+  int itriplet, ipermute, i, j, k, l, m, index1, index2, permute_temp[3];
   int rot1[3][3], rot2[3][3], rot3[3][3], rot_temp[3][3], rot[3][3]; 
   double trans1[3];
   double rot_db[3][3], rot_cart[3][3];
@@ -48,11 +46,6 @@ F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
 
   for(itriplet = 0; itriplet < triplets->size; itriplet++)
   {
-    if (!included[itriplet])
-    {
-      NIndependent->vec[itriplet] = 0;
-      continue;
-    }
     init_dmatrix(CC->mat, LEN, CC->column, 0.0); CC->row=1; // init CC with 1 to guarantee that an array is sent to the gaussian elimination module
     atom1 = triplets->tri[itriplet][0];
     atom2 = triplets->tri[itriplet][1];
@@ -89,7 +82,7 @@ F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
           mat_copy_array_i(mapping3, mappings3->f3[index1][index2], num_atoms);
           if (mapping3[atom3_2] != atom3) continue;
           rotations3 = get_all_point_symmetry_routes_to_star(ps3, positions, atom2_2,  atom3_2, mapping3, symprec);
-	  
+
           for (k=0; k<rotations3->n; k++)
           {
             mat_copy_matrix_i3(rot3, ps3->rot[rotations3->vec[k]]);
@@ -99,14 +92,18 @@ F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
             mat_copy_matrix_i3(ps_triplets->rot[ps_triplets->size++], rot); 
             mat_cast_matrix_3i_to_3d(rot_db, rot);
             mat_get_similar_matrix_d3(rot_cart, rot_db, lattice, 0);
-            mat_out_product_matrix3_permute_d3(PP, rot_cart, rot_cart, rot_cart, permute3[ipermute]);
-            mat_transpose_matrix_d27(PP);
+            mat_transpose_matrix_d3(rot_cart, rot_cart); // Equal to inverse, meaning the rot_cart now maps the star triplet to the original one
+            mat_kron_product_matrix3_d3(PP, rot_cart, rot_cart, rot_cart);
+            for (l = 0; l < 3; l++)
+                permute_temp[l] = get_index_from_array(permute3[ipermute], 3, l);  // find the reverse permutation
+            mat_permute_d27(PP, permute_temp, 0);
             for (l=0; l<27; l++)
               PP[l][l] -= 1.0;
             for (l = 0; l < 27; l++)
             {
               is_found = 0;
               if (mat_check_zero_vector_d27(PP[l], symprec)) continue;
+              mat_normalize_by_abs_vector_d27(PP[l], symprec);
               for (m = 0; m < CC->row; m++)
                 if (mat_all_close_vector_d27(PP[l], CC->mat[m], symprec))
                 {
@@ -229,40 +226,16 @@ void get_fc3_coefficients(double (*coefficients)[27][27],
         mat_multiply_matrix_i3(rot_temp, rot2, rot1);
         mat_multiply_matrix_i3(rot, rot3, rot_temp);
         mat_cast_matrix_3i_to_3d(rot_db, rot);
-        mat_get_similar_matrix_d3(rot_cart, rot_db, lattice, 0);
-        mat_out_product_matrix3_d3(PP, rot_cart, rot_cart, rot_cart);
+        mat_get_similar_matrix_d3(rot_cart, rot_db, lattice, 0); // from a general atom to its star
+        mat_transpose_matrix_d3(rot_cart, rot_cart); // from a star to its orbitals
+        mat_kron_product_matrix3_d3(PP, rot_cart, rot_cart, rot_cart);
         triplet_rot[0] = atom1_1; triplet_rot[1] = atom2_2; triplet_rot[2] = atom3_3;
         indext = get_index_from_vectors_i3(triplets->tri, triplets->size, triplet_rot); // index of triplet
         indexi = get_index_from_array(unique_triplets, num_uniquet, triplet_mapping[indext]); // index of irreducible triplet
-        mat_multiply_matrix_d27(PP, triplet_transform[indext], PP);
-        mat_transpose_matrix_d27(PP);
+
+        mat_multiply_matrix_d27(PP, PP, triplet_transform[indext]);
         ifc_mapping[a1 * natoms * natoms + a2 * natoms + a3] = indexi;
         mat_copy_mat_d27(coefficients[a1 * natoms * natoms + a2 * natoms + a3], PP);
-// 	if (a1 == 4 && a2 == 4 && a3 == 4)
-// 	{
-// 	  get_atom_sent_by_operation(a2, positions->vec, rot1, trans1, natoms, 5e-7);
-// 	  printf("a1=%d, a2=%d, a3=%d\n", a1, a2, a3);
-// 	  printf("map operation:%d\n",mapope1->vec[a1]);
-// 	  for (indext=0; indext<3; indext++)
-// 	  {
-// 	    printf("%d %d %d\n", rot1[indext][0], rot1[indext][1], rot1[indext][2]);
-// 	  }
-// 	  printf("%f %f %f\n", trans1[0], trans1[1], trans1[2]);
-// 	  printf("atom1_1=%d, atom2_1=%d, atom3_1=%d\n", atom1_1, atom2_1, atom3_1);
-// 	  printf("atom2_2=%d, atom3_2=%d\n",atom2_2, atom3_2);
-// 	  printf("atom3_3=%d\n",atom3_3);
-// 	  printf("index of triplet: %d\n", indexi);
-// 	  for (indext=0; indext<3;indext++)
-// 	    printf("%7.4f%7.4f%7.4f\n", rot_cart[indext][0], rot_cart[indext][1],rot_cart[indext][2]);
-// 	  for (indext=0; indext<3;indext++)
-// 	    printf("%7.4f%7.4f%7.4f\n", rot_db[indext][0], rot_db[indext][1],rot_db[indext][2]);
-// 	  for (indext=0; indext<3;indext++)
-// 	    printf("%7.4f%7.4f%7.4f\n", lattice[indext][0], lattice[indext][1],lattice[indext][2]);
-// 	  for (indext=0; indext<27; indext++)
-// 	    printf("%7.4f", PP[0][indext]);
-// 	  printf("\n");
-// 	}
-	
       }
     }
   }
@@ -279,7 +252,6 @@ void get_fc3_coefficients(double (*coefficients)[27][27],
 void rearrange_disp_fc3(double *ddcs, 
 			const double *disps, 
 			const double *coeff, 
-			const double *included,
 			const double *trans,
 			const int *ifcmap, 
 			const int num_step,
@@ -302,8 +274,6 @@ void rearrange_disp_fc3(double *ddcs,
     {
       for (a3=a2; a3<num_atom; a3++) // Considering the permuation symmetry
       {
-	nt = ifcmap[a1 * aa + a2 * num_atom + a3];
-	if (!included[nt]) continue;
 	for (i=0; i< 27; i++)
 	  for (j=0; j<num_irred; j++)
 	  {
@@ -311,6 +281,7 @@ void rearrange_disp_fc3(double *ddcs,
 	    is_zero_coeff_temp[i][j] = 1;
 	  }
 	c = coeff + a1 * aaii + a2 * aii + a3 * ii;
+	nt = ifcmap[a1 * aa + a2 * num_atom + a3];
 	t = trans + nt * 27 * num_irred;
 	for (i=0; i<27; i++)
 	  for (k=0; k<num_irred; k++)

@@ -21,7 +21,7 @@ extension_mdfc = Extension('mdfc._mdfc',
                                'c/mdfc/force_constants.c',
                                'c/mdfc/mathfunc.c'])
 
-setup(name='molettice',
+setup(name='molatics',
       version='0.3',
       description='This is the molecular + lattice dynamics module.',
       author='Wang Xinjiang',

@@ -23,7 +23,9 @@ lib64
 
 # Installer logs
 pip-log.txt
-setup.py.txt
+
+#setup log
+*.py.txt
 
 # Unit test / coverage reports
 .coverage
@@ -45,6 +47,5 @@ _build
 
 #temperary install
 csetup.py
-csetup3.py
-cmake2
-cmake3
+cmake
+

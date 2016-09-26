@@ -691,7 +691,7 @@ int mat_check_identity_matrix_id3( const int a[3][3],
 }
 
 /* m=axb */
-void mat_out_product_matrix3_d3(double Q[27][27],
+void mat_kron_product_matrix3_d3(double Q[27][27],
                                 const double a[3][3],
                                 const double b[3][3],
                                 const double c[3][3])
@@ -706,28 +706,65 @@ void mat_out_product_matrix3_d3(double Q[27][27],
               Q[i * 9 + k * 3 + m][j * 9 + l * 3 + n] = a[i][j] * b[k][l] * c[m][n];
 }
 
-void mat_out_product_matrix3_permute_d3(double Q[27][27],
-          const double a[3][3],
-          const double b[3][3],
-          const double c[3][3],
-          const int permute[3])
-{ // Q(mik, jln) = a_ij * b_kl * c_mn
-  int i, j, k, l, m, n, index[3], p, q, r;
+//void mat_kron_product_matrix3_permute_d3(double Q[27][27],
+//          const double a[3][3],
+//          const double b[3][3],
+//          const double c[3][3],
+//          const int permute[3])
+//{ // Q(mik, jln) = a_ij * b_kl * c_mn
+//  int i, j, k, l, m, n, index[3], p, q, r;
+//  for (i=0; i<27; i++)
+//    for (j=0; j<27; j++)
+//      Q[i][j] = 0.;
+//
+//  for (i = 0; i < 3; i++)
+//    for (j = 0; j < 3; j++)
+//      for (k = 0; k < 3; k++)
+//        for (l = 0; l < 3; l++)
+//          for (m = 0; m < 3; m++)
+//            for (n = 0; n < 3; n++)
+//            {
+//              index[0] = i; index[1] = k; index[2] = m;
+//              p = index[permute[0]]; q = index[permute[1]]; r = index[permute[2]];
+//              Q[p * 9 + q * 3 + r][j * 9 + l * 3 + n] = a[i][j] * b[k][l] * c[m][n];
+//            }
+//}
+
+void mat_permute_d27(double PP[27][27], const int permute[3], const int axis)
+{ // einstein expression (e.g.): ijk -->  jki
+  // axis: 0 or 1, determining which axis to performe permutation on
+  double Q[27][27];
+  int i, j, k, l, m, n, ip, jp, kp, lp, mp, np, abc[3];
   for (i=0; i<27; i++)
     for (j=0; j<27; j++)
       Q[i][j] = 0.;
-    
-  for (i = 0; i < 3; i++) 
-    for (j = 0; j < 3; j++) 
+
+  for (i = 0; i < 3; i++)
+    for (j = 0; j < 3; j++)
       for (k = 0; k < 3; k++)
+      {
+        if (!axis){
+          abc[0] = i; abc[1] = j; abc[2] = k;
+          ip = abc[permute[0]]; jp = abc[permute[1]]; kp = abc[permute[2]];
+        }
+        else{
+          ip = i; jp = j; kp = k;
+        }
         for (l = 0; l < 3; l++)
           for (m = 0; m < 3; m++)
             for (n = 0; n < 3; n++)
             {
-              index[0] = i; index[1] = k; index[2] = m;
-              p = index[permute[0]]; q = index[permute[1]]; r = index[permute[2]];
-              Q[p * 9 + q * 3 + r][j * 9 + l * 3 + n] = a[i][j] * b[k][l] * c[m][n];
+              if (axis){
+                abc[0] = l; abc[1] = m; abc[2] = n;
+                lp = abc[permute[0]]; mp = abc[permute[1]]; np = abc[permute[2]];
+              }
+              else{
+                lp = l; mp = m; np = n;
+              }
+              Q[ip * 9 + jp * 3 + kp][lp * 9 + mp * 3 + np] = PP[i * 9 + j * 3 + k][l * 9 + m * 3 + n];
             }
+      }
+  mat_copy_mat_d27(PP, Q);
 }
 
 void mat_transpose_matrix_d27(double a[27][27])
@@ -1115,6 +1152,21 @@ double mat_Dabs(const double a)
     return a;
 }
 
+void mat_normalize_by_abs_vector_d27(double a[27], double precesion)
+{
+  int i;
+  double value, max = 0;
+  for (i=0; i<27; i++)
+    if (mat_Dabs(a[i]) > max)
+      {
+        max = mat_Dabs(a[i]);
+        value = a[i];
+      }
+  if (max > precesion)
+    for (i = 0; i < 27; i++)
+       a[i] /= value;
+}
+
 int mat_Nint(const double a)
 {
   if (a < 0.0)
@@ -1336,7 +1388,7 @@ int  gaussian(double **b,
         }
       }
     }
-    if(mat_Dabs(a[irow][k])>prec)
+    if(mat_Dabs(a[irow][k]) > prec * 100)
     {    
       Indexdependent[Ndependent++]=k;
       for (j=column-1; j>k; j--)

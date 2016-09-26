@@ -36,7 +36,7 @@ class Settings():
         if len(args) > 0:
             self.input_filename=args[0]
         self._conf={}
-        self.file_format="h"
+        self.file_format="l"
         self.atom_type=None
         self.step_range=slice(None)
         self.is_average_input=False
@@ -260,23 +260,22 @@ class Settings():
                 if self.file_format != "h":
                     warning("hdf5 file format detected, format converted forcibly!")
                     self.file_format="h"
-            elif self.input_filename == "XDATCAR" or self.input_filename == "vasprun.xml":
+            elif self.input_filename == "XDATCAR":
                 if self.file_format != "v":
                     warning("vasp file format detected, format converted forcibly!")
                     self.file_format="v"
         if self.file_format is not None:
             if self.file_format=="v":
                 if self.input_filename is None:
-                    print "vasprun.xml as input file name used by default for the file format of vasp"
-                    self.input_filename="vasprun.xml"
-
+                    print "XDATCAR as input file name used by default for the file format of vasp"
+                    self.input_filename="XDATCAR"
             if self.file_format=="h":
                 if self.input_filename is None:
-                    print "md_cv.hdf5 as input file name used by default for the file format of hdf5"
-                    self.input_filename="md_cv.hdf5"
+                    print "md_velocities.hdf5 as input file name used by default for the file format of hdf5"
+                    self.input_filename="md_velocities.hdf5"
                 elif self.input_filename.split(".")[-1] != "hdf5":
-                    warning("'filename.hdf5' should be used for hdf5 file type, 'md_cv.hdf5' is used!")
-                    self.input_filename="md_cv.hdf5"
+                    warning("'filename.hdf5' should be used for hdf5 file type, 'md_velocities.hdf5' is used!")
+                    self.input_filename="md_velocities.hdf5"
             
             
         

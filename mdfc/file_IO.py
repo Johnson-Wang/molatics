@@ -6,6 +6,23 @@ import numpy as np
 from realmd.information import warning, error
 from realmd.unit import au_energy, au_velocity
 
+def read_fc2_from_hdf5(filename):
+    import h5py
+    f = h5py.File(filename, 'r')
+    if 'fc2' in f.keys():
+        fc2 = f['fc2'][:]
+    else:
+        fc2 = f['force_constants'][:]
+    f.close()
+    return fc2
+
+def read_fc3_from_hdf5(filename):
+    import h5py
+    f = h5py.File(filename, 'r')
+    fc3 = f['fc3'][:]
+    f.close()
+    return fc3
+
 def get_volume_from_md_file(filename="md.out"):
     if not os.path.exists(filename):
         print "file %s does not exist!"%filename

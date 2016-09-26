@@ -3,7 +3,6 @@
 void rearrange_disp_fc2(double *ddcs, 
 			const double *disps, 
 			const double *coeff, 
-			const char *include,
 			const double *trans,
 			const int *ifcmap, 
 			const int num_step,

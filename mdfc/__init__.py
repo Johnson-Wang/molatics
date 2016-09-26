@@ -9,8 +9,8 @@ from phonopy.file_IO import write_FORCE_CONSTANTS, write_force_constants_to_hdf5
 from mdfc.file_IO import write_fc3_hdf5, write_fc2_hdf5
 from force_constants import show_rotational_invariance,\
      set_translational_invariance, show_drift_force_constants
-from mdfc.fc2 import get_irreducible_components2, get_disp_coefficient, get_fc2_least_irreducible_components
-from mdfc.fc3 import  get_fc3_irreducible_components, show_drift_fc3
+# from mdfc.fc2 import get_irreducible_components2, get_fc2_least_irreducible_components, get_disp_coefficient
+from mdfc.fc3 import show_drift_fc3 #, get_fc3_irreducible_components
 from mdfc.force_constants import ForceConstants
 from realmd.information import timeit, print_error_message, warning
 from copy import deepcopy
@@ -49,7 +49,8 @@ class MolecularDynamicsForceConstant:
     def __init__(self,
                  unitcell,
                  supercell_matrix,
-                 cutoff_pair=None,# unit: Angstrom
+                 cutoff_radius=None, # unit: Angstrom
+                 cutoff_pair=None,
                  cutoff_triplet=None,
                  cutoff_force=1e-8,
                  cutoff_disp=None,
@@ -60,9 +61,9 @@ class MolecularDynamicsForceConstant:
                  is_symmetry=True,
                  is_translational_invariance=False,
                  is_rotational_invariance=False,
-                 is_weighted=False,
+                 precision=1e-8,
                  log_level=0,
-                 is_hdf5=True):
+                 is_hdf5=False):
         self._symprec = symprec
         self._unitcell = unitcell
         self._supercell_matrix = supercell_matrix
@@ -75,11 +76,12 @@ class MolecularDynamicsForceConstant:
         self._set_symmetry()
         self._primitive = None
         self._fc2 = None
-        self.set_cutoffs(cutoff_pair, cutoff_triplet)
+        self.set_cutoffs(cutoff_radius, cutoff_pair, cutoff_triplet)
         self._cutoff_force=cutoff_force
         self._cutoff_disp = cutoff_disp
         self._is_rot_inv = is_rotational_invariance
         self._is_trans_inv = is_translational_invariance
+        self._precision = precision
         self._is_hdf5 = is_hdf5
         self._count = count
         self._positions = self.supercell.get_scaled_positions()
@@ -93,8 +95,7 @@ class MolecularDynamicsForceConstant:
         self.map_operations2 = None
         self._coeff2 = None
         self._converge2 = False
-        self._fc = ForceConstants(self.supercell, self.symmetry)
-        self._is_weighted=is_weighted
+        self._fc = ForceConstants(self.supercell, self._unitcell, self.symmetry, cutoff=self._cutoff, precision = precision)
         self._step = 0
         self._forces1 = None
         self._forces2 = None
@@ -132,56 +133,21 @@ class MolecularDynamicsForceConstant:
         return self._factor
     unit_conversion_factor = property(get_unit_conversion_factor)
 
+    def get_fc(self):
+        return self._fc
+    fc = property(get_fc)
+
+    def get_fc2(self):
+        return self._fc2
+    fc2 = property(get_fc2)
+
+
     def run_fc2(self):
-        fc = self._fc
-        fc.set_first_independents()
-        print "Under the system symmetry"
-        print "Number of first independent atoms: %4d" % fc._ind1['natoms']
-        fc.set_second_independents(pair_included=self._cutoff.get_pair_inclusion())
-        print "Number of second independent atoms %4d" %np.sum(fc._ind2['natoms'])
-        # if not self._cutoff.get_pair_inclusion().all():
-        #     print "Number of second independent atoms reduces to %d after cutoff" %fc._ind2['included'].sum()
-        fc.get_irreducible_fc2s_with_permute()
-    
-
-        fc.get_fc2_coefficients()
-        if self._cutoff.get_cutoff_pair() is not None:
-            pair_inclusion = self._cutoff.get_pair_inclusion()
-            fc.set_pair_reduced_included(pair_inclusion)
-        else:
-            fc.set_pair_reduced_included()
-        print "Permutation symmetry reduces number of irreducible pairs from %4d to %4d"\
-              %(np.sum(fc._ind2['natoms']), len(fc._pairs_reduced))
-        if self._cutoff.get_cutoff_pair() is not None:
-            print "The artificial cutoff reduces number of irreducible pairs from %4d to %4d"\
-                  %(len(fc._pairs_reduced), np.sum(fc._is_pairs_included))
-        print "Calculating transformation coefficients..."
-        print "Number of independent fc2 components: %d" %(np.sum(fc._is_pairs_included)*9)
-        fc.get_irreducible_fc2_components_with_spg()
-        print "Point group invariance reduces independent fc2 components to %d" %(len(fc._ifc2_ele))
-        sys.stdout.flush()
-        if self._is_trans_inv:
-            fc.get_fc2_translational_invariance()
-            print "Translational invariance further reduces independent fc2 components to %d" %len(fc._ifc2_ele)
-        if self._is_rot_inv:
-            fc.get_fc2_rotational_invariance(self.unitcell)
-            print "Rotational invariance further reduces independent fc2 components to %d" %len(fc._ifc2_ele)
-        print "Independent fc2 components calculation completed"
-        sys.stdout.flush()
-        #
-        # fc2 = read_force_constants_hdf5("fc2.hdf5")
-        # fc2_reduced = np.array([fc2[pai] for pai in fc._pairs_reduced])
-        # fc2p = fc2_reduced.flatten()[fc._ifc2_ele]
-        # pair = (3,1)
-        # trans = np.dot(fc._coeff2[pair], fc._ifc2_trans[fc._ifc2_map[pair]])
-        # print np.dot(trans, fc2p).reshape(3,3)
-        # print fc2[pair]
-        # print np.dot(fc._coeff2[pair], fc2_reduced[fc._ifc2_map[pair]].flatten()).reshape(3,3)
-
-        self._coeff2 = fc._coeff2
-        self.ifc2_map = fc._ifc2_map
-        self.irred_trans = fc._ifc2_trans
-        self._num_irred_fc2 = len(fc._ifc2_ele)
+        self._fc.set_fc2_irreducible_elements(is_trans_inv=self._is_trans_inv, is_rot_inv=self._is_rot_inv)
+        self._coeff2 = self._fc._coeff2
+        self.ifc2_map = self._fc._ifc2_map
+        self.irred_trans = self._fc._ifc2_trans
+        self._num_irred_fc2 = len(self._fc._ifc2_ele)
         # self.set_disp_and_forces()
         for i in self:
             pass
@@ -211,9 +177,9 @@ class MolecularDynamicsForceConstant:
         self._forces = - forces # the negative sign enforces F = Phi .dot. U
         self._resi_force = np.average(forces, axis=0)
         self._resi_force_abs = np.zeros_like(self._resi_force)
-        self._pos_equi = self.supercell.get_positions()
+        # self._pos_equi = self.supercell.get_positions()
         print "Initial equilibrium positions are set as the average positions"
-        # self._pos_equi = np.average(coordinates, axis=0)
+        self._pos_equi = np.average(coordinates, axis=0)
         self._displacements = coordinates - self._pos_equi
         assert (np.abs(self._displacements).max(axis=(0,1)) <  np.sqrt(np.sum(self.supercell.get_cell() ** 2, axis=0)) / 2).all(),\
             "The coordinates should not be folded, that is, once an atom goes beyond the box\
@@ -226,27 +192,21 @@ class MolecularDynamicsForceConstant:
         # self.irred_fc = np.zeros(self._num_irred_fc2, dtype="double")
         forces = self._forces[:]
         ddcs2 = np.zeros((num_step, self._num_atom, 3,  self._num_irred_fc2), dtype="double")
-        weight = np.ones_like(self._fc._is_pairs_included, dtype="double")
         if lang == "C":
             import _mdfc as mdfc
             mdfc.rearrange_disp_fc2(ddcs2,
                                     self._displacements,
                                     self._coeff2.astype("double").copy(),
-                                    self._fc._is_pairs_included.copy().astype("int8"),
                                     self.irred_trans.astype("double").copy(),
                                     self.ifc2_map.astype("intc").copy(),
                                     1e-6)
         else:
-            pair_inclusion = self._fc._is_pairs_included
             ddcs2 = np.zeros((num_step, self._num_atom, 3,  self._num_irred_fc2), dtype="double")
             for atom1 in range(self._num_atom):
                 for atom2 in range(self._num_atom):
-                    map_pair = self.ifc2_map[atom1, atom2]
-                    if pair_inclusion[map_pair]:
-                        continue
                     disp = self._displacements[:, atom2]
                     coeff = np.dot(self._coeff2[atom1, atom2],
-                                   self.irred_trans[map_pair]).reshape(3,3,-1)
+                                   self.irred_trans[self.ifc2_map[atom1, atom2]]).reshape(3,3,-1)
                     ddcs2[:, atom1] += np.einsum("abn, Nb -> Nan", coeff, disp)# i: md steps; j; natom; k: 3
 
         self._ddcs2 = ddcs2
@@ -346,46 +306,16 @@ class MolecularDynamicsForceConstant:
 
     @timeit
     def set_fc3_irreducible_components(self):
-        # dds = get_fourth_order_displacements(self.supercell, self.symmetry, is_plusminus=False, is_diagonal=False)
-        # coeff, ifcmap, trans = get_fc3_irreducible_components(self.supercell, self.symmetry, self.fc2)
         fc = self._fc
-
-        # import h5py
-        # f = h5py.File("fc3.hdf5")
-        # fc3 = f['fc3'][:]
-        # f.close()
-
-
-
         fc.set_third_independents()
-        # fc3_triplets = np.array([fc3[tt] for tt in fc._triplets]) # delete
-        print "Number of triplets in calculating 3rd IFC: %d" %len(fc._triplets)
+        print "Number of 3rd IFC: %d" %(27 * len(fc._triplets))
         fc.get_irreducible_fc3s_with_permute()
-        print "Permutation reduces triplets to %d"%len(fc._triplets_reduced)
+        print "Permutation reduces 3rd IFC to %d"%(27 * len(fc._triplets_reduced))
+        fc.get_irreducible_fc3_components_with_spg()
+        print "spg invariance reduces 3rd IFC to %d"%(len(fc._ifc3_ele))
         print "Calculating fc3 coefficient..."
         fc.get_fc3_coefficients()
-        if self._cutoff.get_cutoff_triplet() is not None:
-            print "Setting cutoff on fc3..."
-            triplets_inclusion = self._cutoff.get_triplet_inclusion(triplets=fc._triplets_reduced)
-            fc.set_triplet_reduced_included(triplets_inclusion)
-            print "Cutoff on FC3 reduces the number of triplets further to %d"%np.sum(fc._is_triplets_included)
-        else:
-            fc.set_triplet_reduced_included()
-        # fc3_ir_triplets = np.array([fc3[tt] for tt in fc._triplets_reduced]) # delete
-        # fc_in = np.array([fc3[fc._triplets_reduced[ppp]] for ppp in np.where(fc._is_triplets_included)[0]])
-        # fc_ni = np.array([fc3[fc._triplets_reduced[ppp]] for ppp in np.where(fc._is_triplets_included==False)[0]])
-        fc.get_irreducible_fc3_components_with_spg()
-        # for tp in range(len(fc3_ir_triplets)):
-        #     print (np.dot(fc._ifc3_trans[tp], fc3_ir_triplets.flatten()[fc._ifc3_ele]) - fc3_ir_triplets[tp].flatten()).round(6)
-        print "spg invariance reduces 3rd IFC from %d to %d" %(np.sum(fc._is_triplets_included)*27, len(fc._ifc3_ele))
 
-
-
-        # np.set_printoptions(formatter={'float':lambda x: format(x, '7.4f')})
-        # for triplet in [(4,4,4), (4, 5, 10), (38, 24, 10), (22, 27, 39)]:
-        #     print np.dot(fc._coeff3[triplet], np.dot(fc._ifc3_trans[fc._ifc3_map[triplet]],
-        #                                              fc3_ir_triplets.flatten()[fc._ifc3_ele])).round(6) -\
-        #           fc3[triplet].flatten().round(6)
 
         if self._is_trans_inv:
             fc.get_fc3_translational_invariance()
@@ -394,7 +324,6 @@ class MolecularDynamicsForceConstant:
             fc.get_fc3_rotational_invariance(self._fc2)
             print "rotational invariance reduces 3rd IFC to %d"%(len(fc._ifc3_ele))
         self._num_irred_fc3 = len(fc._ifc3_ele)
-        sys.stdout.flush()
 
     @timeit
     def calculate_irreducible_fc3(self):
@@ -404,19 +333,6 @@ class MolecularDynamicsForceConstant:
         trans = fc._ifc3_trans
         num_irred = trans.shape[-1]
         num_step = len(self._displacements)
-        included = fc._is_triplets_included
-        # #
-        # import h5py
-        # f=h5py.File("fc3-direct.hdf5")
-        # fc3=f['fc3'].value
-        # f.close()
-        # fc3_pair = np.array([fc3[i] for i in fc._triplets_reduced])
-        # fc3_reduced = fc3_pair.flatten()[fc._ifc3_ele]
-        # f=h5py.File("fc2.hdf5")
-        # fc2=f['fc2'].value
-        # f.close()
-        # fc2_pair = np.array([fc2[i] for i in fc._pairs_reduced])
-        # fc2_reduced = fc2_pair.flatten()[fc._ifc2_ele]
         print "Calculating fc3..."
         sys.stdout.flush()
         import _mdfc as mdfc
@@ -425,11 +341,9 @@ class MolecularDynamicsForceConstant:
         mdfc.rearrange_disp_fc3(ddcs,
                                 self._displacements,
                                 coeff,
-                                included.astype("int8"),
                                 trans,
                                 ifcmap,
                                 1e-6)
-
         # self._ddcs = np.contatenate((self._ddcs, ddcs3 / 2), axis=2)
         # for atom1 in np.arange(self._num_atom):
         #     for atom2 in np.arange(self._num_atom):
@@ -442,8 +356,6 @@ class MolecularDynamicsForceConstant:
         #             if atom2 == atom3:
         #                 sum_temp *= 2
         #             ddcs[:,atom1] += sum_temp
-        # self._forces2 = self._forces1 - 1. / 2. * np.dot(ddcs, fc3_reduced)
-        # self._fc3_irred = fc3_reduced
         pinv = np.linalg.pinv(ddcs.reshape(-1, num_irred), rcond=1e-10)
         self._fc3_irred = 2 * np.dot(pinv, self._forces1.flatten())
         self._forces2 = self._forces1 - 1./2. * np.dot(ddcs, self._fc3_irred) # residual force after 3rd IFC
@@ -520,9 +432,9 @@ class MolecularDynamicsForceConstant:
 
 
 
-    def set_cutoffs(self, cutoff_pair=None, cutoff_triplet=None):
+    def set_cutoffs(self, cutoff_radius=None, cutoff_pair=None, cutoff_triplet=None):
         specie, sequence = np.unique(self._unitcell.get_atomic_numbers(), return_index=True)
-        self._cutoff = Cutoff(specie[np.argsort(sequence)], cutoff_pair, cutoff_triplet)
+        self._cutoff = Cutoff(specie[np.argsort(sequence)], cutoff_radius, cutoff_pair, cutoff_triplet)
         self._cutoff.set_cell(self.supercell, symprec=self._symprec)
 
 
@@ -567,17 +479,23 @@ class MolecularDynamicsForceConstant:
     def set_force_sets(self, sets_of_forces_objects):
         self._set_of_forces_objects = sets_of_forces_objects
 
-    def get_fc2(self):
-        return self._fc2
-    fc2 = property(get_fc2)
 
 
 
 class Cutoff():
-    def __init__(self, species, cut_pair, cut_triplets):
+    def __init__(self, species, cut_radius, cut_pair, cut_triplets):
         self._cell = None
         self._pair_distances = None
         n = len(species)
+        if cut_radius is not None:
+            if len(cut_radius) == 1:
+                self._cut_radius = [cut_radius[0] for i in range(n)]
+            elif len(cut_radius) == n:
+                self._cut_radius = cut_radius
+            else:
+                print_error_message("Cutoff radius number %d not equal the number of species %d!" %(len(cut_radius), n))
+        else:
+            self._cut_radius = None
 
         # cutoff pair
         cp = np.ones((n, n), dtype="float") * 10000
@@ -587,41 +505,31 @@ class Cutoff():
                     for j in range(i,n):
                         cp[i,j] = cp[j,i] = cut_pair.pop(0)
                 self._cut_pair = cp
-            elif len(cut_pair) == n:
-                for i, j in np.ndindex((n,n)):
-                    cp[i,j] = np.average([cut_pair[i], cut_pair[j]])
-            elif len(cut_pair) == 1:
-                for i, j in np.ndindex((n,n)):
-                    cp[i,j] = cut_pair[0]
             else:
-                print_error_message("Cutoff pairs not equal to the number needed [1, n or (n+1)*n/2]!")
+                print_error_message("Cutoff pairs %d not equal to the number needed %d!" %(len(cut_pair), (n +1) * n / 2))
+        elif self._cut_radius is not None:
+            for i, j in np.ndindex((n,n)):
+                cp[i,j] = min(self._cut_radius[i], self._cut_radius[j])
+            self._cut_pair = cp
         else:
             self._cut_pair = None
 
         # cutoff triplet
+        ct = np.ones((n,n,n), dtype="float") * 10000
         if cut_triplets is not None:
-            ct = np.ones((n,n,n), dtype="float") * 10000
             if len(cut_triplets) == n * (n + 1) * (n + 2) / 6:
                 for i in range(n):
                     for j in range(i,n):
                         for k in range(j,n):
                             ct[i,j,k] = ct[i,k,j] = ct[j,i,k] = ct[j,k,i] =\
                                 ct[k,i,j] = ct[k,j,i] = cut_triplets.pop(0)
-            elif len(cut_triplets) == (n +1) * n / 2:
-                cp = np.ones((n, n), dtype="float") * 10000
-                for i in range(n):
-                    for j in range(i,n):
-                        cp[i,j] = cp[j,i] = cut_triplets.pop(0)
-                for i,j,k in np.ndindex((n,n,n)):
-                    ct[i,j,k] = np.average([cp[i,j], cp[i,k], cp[j,k]])
-            elif len(cut_triplets) == n:
-                for i,j,k in np.ndindex((n,n,n)):
-                    ct[i,j,k] = np.average([cut_triplets[i], cut_triplets[j], cut_triplets[k]])
-            elif len(cut_triplets) == 1:
-                for i,j,k in np.ndindex((n,n,n)):
-                    ct[i,j,k] = cut_triplets[0]
+                self._cut_triplet = ct
             else:
-                print_error_message("Cutoff triplets not equal to the number needed[1, n, (n+1)*n/2 or n*(n+1)*(n+2)/6]!")
+                print_error_message("Cutoff triplets %d not equal to the number needed %d!"\
+                                    %(len(cut_triplets), n * (n + 1) * (n + 2) / 6))
+        elif self._cut_pair is not None:
+            for i,j,k in np.ndindex((n,n,n)):
+                ct[i,j,k] = min(self._cut_pair[i,j], self._cut_pair[i,k], self._cut_pair[j,k])
             self._cut_triplet = ct
         else:
             self._cut_triplet = None
@@ -634,6 +542,8 @@ class Cutoff():
     def get_cutoff_pair(self):
         return self._cut_pair
 
+    def get_cutoff_radius(self):
+        return self._cut_radius
 
     def get_cutoff_triplet(self):
         return self._cut_triplet
@@ -652,59 +562,39 @@ class Cutoff():
             cutpair_expand = None
         return cutpair_expand
 
-    def expand_triplet(self, triplets=None):
+    def expand_triplet(self):
         natom = self._cell.get_number_of_atoms()
         unique_atoms, index_unique = np.unique(self._cell.get_atomic_numbers(), return_index=True)
         unique_atoms = unique_atoms[np.argsort(index_unique)] # in order to keep the specie sequence unchanged
         if self.get_cutoff_triplet() is not None:
-            if triplets is not None:
-                cut_triplet_expand = np.zeros(len(triplets), dtype="double")
-                for t, triplet in enumerate(triplets):
-                    i, j, k = triplet
-                    index_specie_i = np.where(unique_atoms == self._cell.get_atomic_numbers()[i])[0]
+            cut_triplet_expand = np.zeros((natom, natom, natom), dtype="double")
+            for i in range(natom):
+                index_specie_i = np.where(unique_atoms == self._cell.get_atomic_numbers()[i])[0]
+                for j in range(i, natom):
                     index_specie_j = np.where(unique_atoms == self._cell.get_atomic_numbers()[j])[0]
-                    index_specie_k = np.where(unique_atoms == self._cell.get_atomic_numbers()[k])[0]
-                    cut_temp  = self._cut_triplet[index_specie_i, index_specie_j, index_specie_k]
-                    cut_triplet_expand[t] = cut_temp
-                    # cut_triplet_expand[i,j, k] =  self._cut_triplet[index_specie_i, index_specie_j, index_specie_k]
-            else:
-                cut_triplet_expand = np.zeros((natom, natom, natom), dtype="double")
-                for i in range(natom):
-                    index_specie_i = np.where(unique_atoms == self._cell.get_atomic_numbers()[i])[0]
-                    for j in range(i, natom):
-                        index_specie_j = np.where(unique_atoms == self._cell.get_atomic_numbers()[j])[0]
-                        for k in range(j, natom):
-                            index_specie_k = np.where(unique_atoms == self._cell.get_atomic_numbers()[k])[0]
-                            cut_temp  = self._cut_triplet[index_specie_i, index_specie_j, index_specie_k]
-                            cut_triplet_expand[i,j,k] = cut_temp
-                            cut_triplet_expand[j,i,k] = cut_temp
-                            cut_triplet_expand[i,k,j] = cut_temp
-                            cut_triplet_expand[j,k,i] = cut_temp
-                            cut_triplet_expand[k,i,j] = cut_temp
-                            cut_triplet_expand[k,j,i] = cut_temp
-                            # cut_triplet_expand[i,j, k] =  self._cut_triplet[index_specie_i, index_specie_j, index_specie_k]
+                    for k in range(j, natom):
+                        index_specie_k = np.where(unique_atoms == self._cell.get_atomic_numbers()[k])[0]
+                        cut_temp  = self._cut_triplet[index_specie_i, index_specie_j, index_specie_k]
+                        cut_triplet_expand[i,j,k] = cut_temp
+                        cut_triplet_expand[j,i,k] = cut_temp
+                        cut_triplet_expand[i,k,j] = cut_temp
+                        cut_triplet_expand[j,k,i] = cut_temp
+                        cut_triplet_expand[k,i,j] = cut_temp
+                        cut_triplet_expand[k,j,i] = cut_temp
+                        # cut_triplet_expand[i,j, k] =  self._cut_triplet[index_specie_i, index_specie_j, index_specie_k]
         else:
             cut_triplet_expand = None
         return cut_triplet_expand
 
-    def set_pair_distances(self, triplets=None):
+    def set_pair_distances(self):
         num_atom = self._cell.get_number_of_atoms()
         lattice = self._cell.get_cell()
         min_distances = np.zeros((num_atom, num_atom), dtype='double')
-        if triplets is not None:
-            for triplet in triplets:
-                for permute in [(0,1), (1,2), (0,2)]:
-                    i, j = triplet[permute[0]], triplet[permute[1]]
-                    min_distances[i, j] = min_distances[j, i] =\
-                        np.linalg.norm(np.dot(
-                            get_equivalent_smallest_vectors(
-                                i, j, self._cell, lattice, self._symprec)[0], lattice))
-        else:
-            for i in range(num_atom): # run in cell
-                for j in range(num_atom): # run in primitive
-                    min_distances[i, j] = np.linalg.norm(np.dot(
-                            get_equivalent_smallest_vectors(
-                                i, j, self._cell, lattice, self._symprec)[0], lattice))
+        for i in range(num_atom): # run in cell
+            for j in range(num_atom): # run in primitive
+                min_distances[i, j] = np.linalg.norm(np.dot(
+                        get_equivalent_smallest_vectors(
+                            i, j, self._cell, lattice, self._symprec)[0], lattice))
         self._pair_distances = min_distances
 
     def get_pair_inclusion(self):
@@ -715,43 +605,20 @@ class Cutoff():
             self.set_pair_distances()
         for i, j in np.ndindex(num_atom, num_atom):
             if cut_pair is not None:
-                ave_dist = (self._pair_distances[i,j] + self._pair_distances[j,i]) / 2.
-                if ave_dist > cut_pair[i,j]:
+                max_dist = max(self._pair_distances[i,j], self._pair_distances[j,i])
+                if max_dist > cut_pair[i,j]:
                     include_pair[i,j] = False
         return include_pair
 
-    def get_coefficient_weight(self, pair_or_triplets, weight=None):
-        if self._pair_distances is None:
-            self.set_pair_distances()
-        if weight is None:
-            weight = 1.
-        weights = np.zeros(len(pair_or_triplets), dtype="double")
-        for i, pt in enumerate(pair_or_triplets):
-            if len(pt) == 2:
-                a, b = pt
-                dist  = self._pair_distances[a, b]
-            if len(pt) == 3:
-                a, b, c  = pt
-                dist = np.average(self._pair_distances[a, b], self._pair_distances[b, c], self._pair_distances[a, c])
-            weights[i] = np.exp(dist) * weight
-        return weights
-
-
-
-
-    def get_triplet_inclusion(self, triplets):
+    def get_triplet_inclusion(self):
         num_atom = self._cell.get_number_of_atoms()
-        cut_triplet = self.expand_triplet(triplets)
-
+        cut_triplet = self.expand_triplet()
+        include_triplet= np.ones((num_atom, num_atom, num_atom), dtype=bool)
         if self._pair_distances == None:
             self.set_pair_distances()
-        include_triplet= np.ones(len(triplets), dtype=bool)
-        for t, triplet in enumerate(triplets):
-            i, j, k  = triplet
+        for i, j, k in np.ndindex(num_atom, num_atom, num_atom):
             if cut_triplet is not None:
-                a, b, c = self._pair_distances[i,j], self._pair_distances[j,k], self._pair_distances[i,k]
-                dist = (a + b + c) / 3.
-                # max_dist = max(self._pair_distances[i,j], self._pair_distances[j,k],self._pair_distances[i,k])
-                if dist > cut_triplet[t]:
-                    include_triplet[t] = False
+                max_dist = max(self._pair_distances[i,j], self._pair_distances[j,k],self._pair_distances[i,k])
+                if max_dist > cut_triplet[i, j, k]:
+                    include_triplet[i,j, k] = False
         return include_triplet

@@ -49,10 +49,6 @@ int get_atom_sent_by_operation(const int orig_atom, const double (*positions)[3]
   int i;
   mat_multiply_matrix_vector_id3(rot_pos, rot, positions[orig_atom]);
   mat_add_vector_d3(ope_pos, rot_pos, tran);
-//   if (precesion == 5e-7){
-//   printf("%f%f%f\n", rot_pos[0], rot_pos[1], rot_pos[2]);
-//   printf("%f%f%f\n", ope_pos[0], ope_pos[1], ope_pos[2]);
-//   }
   for (i=0; i<num_atoms; i++)
   {
     mat_sub_vector_d3(diff, positions[i], ope_pos);

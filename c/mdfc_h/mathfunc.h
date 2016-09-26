@@ -127,15 +127,12 @@ void free_if3tensor(int ***t);
 void free_df3tensor(double ***t);
 /* free a double f3tensor allocated by f3tensor() */
 
-void mat_out_product_matrix3_permute_d3(double Q[27][27],
-          const double a[3][3],
-          const double b[3][3],
-          const double c[3][3],
-          const int permute[3]);
-void mat_out_product_matrix3_d3(double Q[27][27],
+void mat_permute_d27(double PP[27][27], const int permute[3], const int axis);
+void mat_kron_product_matrix3_d3(double Q[27][27],
                                 const double a[3][3],
         const double b[3][3],
         const double c[3][3]);
+void mat_normalize_by_abs_vector_d27(double a[27], double precesion);
 void mat_transpose_matrix_d27(double a[27][27]);
 int mat_check_zero_vector_d27(const double a[27], const double prec);
 int mat_all_close_vector_d27(const double a[27], const double b[27], const double prec);

@@ -12,10 +12,12 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args);
 static PyObject * py_rearrange_disp_fc3(PyObject *self, PyObject *args);
 static PyObject * py_rearrange_disp_fc2(PyObject *self, PyObject *args);
 static PyObject * py_test(PyObject *self, PyObject *args);
+static PyObject * py_gaussian(PyObject *self, PyObject *args);
 static PyMethodDef functions[] = {
   {"pinv", py_phonopy_pinv, METH_VARARGS, "Pseudo-inverse using Lapack dgesvd"},
   {"pinv_mt", py_phonopy_pinv_mt, METH_VARARGS, "Multi-threading pseudo-inverse using Lapack dgesvd"},
   {"test",py_test, METH_VARARGS, "testing"},
+  {"gaussian", py_gaussian, METH_VARARGS, "Gaussian elimination"},
   {"get_fc3_coefficients", py_get_fc3_coefficients, METH_VARARGS, "Obtain the transformation matrix from irreducible fc3 (<=27) triplets to the whole"},
   {"get_fc3_spg_invariance", py_get_fc3_spg_invariance, METH_VARARGS, "Obtain the transformation matrix from irreducible fc3 (<=27) components to full (27) for each irreducible fc3 unit"},
   {"rearrange_disp_fc3", py_rearrange_disp_fc3, METH_VARARGS, "Rearrange the displacements as the coefficients of fc3"},
@@ -98,7 +100,6 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
   import_array();
   PyObject *tuple_return;
   PyArrayObject* triplets_reduced_py;
-  PyArrayObject* triplets_included_py;
   PyArrayObject* positions_py;
   PyArrayObject* rotations_atom1_py;
   PyArrayObject* translations_atom1_py;
@@ -123,16 +124,14 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
   double (*lattice)[3];
   VecDBL *positions;
   Triplet *triplets;
-  char *triplets_included;
   Symmetry *symmetries_atom1;
   PointSymmetry *ps_atom2, *ps_atom3;
   VecArbiLenINT *mappings_atom1;
   MatArbiLenINT *mappings_atom2;
   F3ArbiLenINT *mappings_atom3;
 
-  if (!PyArg_ParseTuple(args, "OOOOOOOOOOOOOd",
+  if (!PyArg_ParseTuple(args, "OOOOOOOOOOOOd",
       &triplets_reduced_py,
-      &triplets_included_py,
       &positions_py,
       &rotations_atom1_py,
       &translations_atom1_py,
@@ -149,7 +148,6 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
   }
   
   ntriplets = (int)triplets_reduced_py->dimensions[0];
-  
   natoms = (int)positions_py->dimensions[0];
   nind1 = (int)mappings_atom3_py->dimensions[0];
   nind2 = (int)mappings_atom3_py->dimensions[1];
@@ -176,7 +174,6 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
   
   triplets->size = (int)triplets_reduced_py->dimensions[0];
   triplets->tri = (int(*)[3])triplets_reduced_py->data;
-  triplets_included = (char*)triplets_included_py->data;
   positions->size = (int)positions_py->dimensions[0];
   positions->vec = (double (*)[3]) positions_py->data;
   symmetries_atom1->size = (int)rotations_atom1_py->dimensions[0];
@@ -208,9 +205,8 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
       for (k=0; k<natoms; k++)
         mappings_atom3->f3[i][j][k] = mappings_atom3_1d[i*nind2*natoms+j*natoms+k];
   
-  transformations =  get_fc3_spg_invariance(independents,
+  transformations = get_fc3_spg_invariance(independents,
                       triplets,
-		      triplets_included,
                       positions,
                       symmetries_atom1,
                       mappings_atom1,
@@ -304,15 +300,51 @@ static PyObject * py_test(PyObject *self, PyObject *args)
   return tuple_return;
 }
 
+static PyObject * py_gaussian(PyObject *self, PyObject *args)
+{
+  Py_Initialize();
+  import_array();
+  PyArrayObject* matrix_py;
+  PyArrayObject* transform_py;
+  PyArrayObject* independents_py;
+  MatArbiLenDBL* matrix, *transform;
+  double *matrix1D, *transform1D, precesion;
+  int *independents;
+  int row, column, i, j, num_independent;
+  if (!PyArg_ParseTuple(args, "OOOd",
+      &transform_py,
+      &matrix_py,
+      &independents_py,
+      &precesion)) {
+    return NULL;
+  }
+  row = (int)matrix_py->dimensions[0];
+  column = (int) matrix_py->dimensions[1];
+  matrix1D = (double*) matrix_py->data;
+  transform1D = (double*)transform_py->data;
+  independents = (int*)independents_py->data;
+  matrix = alloc_MatArbiLenDBL(row, column);
+  transform = alloc_MatArbiLenDBL(column, column);
+  for (i = 0; i < row; i++)
+    for (j = 0; j < column; j++)
+      matrix->mat[i][j] = matrix1D[i * column + j];
+  num_independent = gaussian(transform->mat, independents, matrix->mat, row, column, precesion);
+  for (i = 0; i < column; i++)
+    for (j = 0; j < num_independent; j++)
+      transform1D[i * column + j] = transform->mat[i][j];
+  free_MatArbiLenINT(matrix);
+  free_MatArbiLenINT(transform);
+  return PyInt_FromLong((long) num_independent);
+}
+
 static PyObject * py_rearrange_disp_fc3(PyObject *self, PyObject *args)
 {
-  PyArrayObject *py_ddcs, *py_disps, *py_coeff, *py_trans, *py_ifcmap, *py_included;
+  PyArrayObject *py_ddcs, *py_disps, *py_coeff, *py_trans, *py_ifcmap;
   double coeff_cutoff;
-  if (!PyArg_ParseTuple(args, "OOOOOOd",
+  if (!PyArg_ParseTuple(args, "OOOOOd",
       &py_ddcs,
       &py_disps,
       &py_coeff,
-      &py_included,
       &py_trans,
       &py_ifcmap, 
       &coeff_cutoff)) {
@@ -322,24 +354,22 @@ static PyObject * py_rearrange_disp_fc3(PyObject *self, PyObject *args)
   const double *disps = (double*) py_disps->data;
   const double *coeff = (double*) py_coeff->data;
   const double *trans = (double*) py_trans->data;
-  const char *included = (double*)py_included->data;
   const int *ifcmap = (int*) py_ifcmap->data;
   const int num_irred = py_trans->dimensions[2];
   const int num_step = py_disps->dimensions[0];
   const int num_atom = py_disps->dimensions[1];
-  rearrange_disp_fc3(ddcs, disps, coeff, included, trans, ifcmap, num_step, num_atom, num_irred, coeff_cutoff);
+  rearrange_disp_fc3(ddcs, disps, coeff, trans, ifcmap, num_step, num_atom, num_irred, coeff_cutoff);
   Py_RETURN_NONE;
 }
 
 static PyObject * py_rearrange_disp_fc2(PyObject *self, PyObject *args)
 {
-  PyArrayObject *py_ddcs, *py_disps, *py_coeff, *py_trans, *py_ifcmap, *py_include;
+  PyArrayObject *py_ddcs, *py_disps, *py_coeff, *py_trans, *py_ifcmap;
   double coeff_cutoff;
-  if (!PyArg_ParseTuple(args, "OOOOOOd",
+  if (!PyArg_ParseTuple(args, "OOOOOd",
       &py_ddcs,
       &py_disps,
       &py_coeff,
-      &py_include,
       &py_trans,
       &py_ifcmap, 
       &coeff_cutoff)) {
@@ -348,13 +378,12 @@ static PyObject * py_rearrange_disp_fc2(PyObject *self, PyObject *args)
   double *ddcs = (double*)py_ddcs->data;
   const double *disps = (double*) py_disps->data;
   const double *coeff = (double*) py_coeff->data;
-  const char *include = (char*)py_include->data;
   const double *trans = (double*) py_trans->data;
   const int *ifcmap = (int*) py_ifcmap->data;
   const int num_irred = py_trans->dimensions[2];
   const int num_step = py_disps->dimensions[0];
   const int num_atom = py_disps->dimensions[1];
-  rearrange_disp_fc2(ddcs, disps, coeff, include, trans, ifcmap, num_step, num_atom, num_irred, coeff_cutoff);
+  rearrange_disp_fc2(ddcs, disps, coeff, trans, ifcmap, num_step, num_atom, num_irred, coeff_cutoff);
   Py_RETURN_NONE;
 }
 
@@ -457,11 +486,6 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
   positions->vec = (double (*)[3]) positions_py->data;
   symmetries_atom1->size = (int)rotations_atom1_py->dimensions[0];
   symmetries_atom1->rot = (int (*)[3][3]) rotations_atom1_py->data;
-//   for (i=0; i<symmetries_atom1->size; i++)
-//   {
-//     for (j=0; j<9; j++)
-//       printf("%d",symmetries_atom1->rot[i][j]);
-//   }
   symmetries_atom1->trans = (double (*)[3]) translations_atom1_py->data;
   for (i=0; i<nind1; i++)
   {

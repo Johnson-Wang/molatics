@@ -5,8 +5,7 @@
 #define LEN 10000
 void rearrange_disp_fc2(double *ddcs, 
 			const double *disps, 
-			const double *coeff,
-			const char *include,
+			const double *coeff, 
 			const double *trans,
 			const int *ifcmap, 
 			const int num_step,
@@ -25,8 +24,6 @@ void rearrange_disp_fc2(double *ddcs,
   {
     for (a2=0; a2<num_atom; a2++)
     {
-      nt = ifcmap[a1 * num_atom + a2];
-      if (!include[nt]) continue;
       for (i=0; i< 9; i++)
 	for (j=0; j<num_irred; j++)
 	{
@@ -34,6 +31,7 @@ void rearrange_disp_fc2(double *ddcs,
 	  is_zero_coeff_temp[i][j] = 1;
 	}
       c = coeff + a1 * aii + a2 * ii;
+      nt = ifcmap[a1 * num_atom + a2];
       t = trans + nt * 9 * num_irred;
       for (i=0; i<9; i++)
 	for (k=0; k<num_irred; k++)
