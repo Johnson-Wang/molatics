@@ -303,6 +303,15 @@ mdfc = MDFC(unitcell,
 
 if settings.get_read_fc2() is not None:
     print "##########%s is read and tunned to satisfy symmetry conditions#############" %settings.get_read_fc2()
+    print "Precision used for reducing symmetry constraints: %e" %settings.get_precision()
+    if settings.get_is_translational_invariance():
+        print "Translational invariance: ON"
+    else:
+        print "Translational invariance: OFF"
+    if settings.get_is_rotational_invariance():
+        print "Rotational invariance: ON"
+    else:
+        print "Rotational invariance: OFF"
     fc = mdfc.fc
     if settings.get_supercell_matrix_orig() is not None:
         if not np.all(np.array(settings.get_supercell_matrix_orig()) <= np.array(settings.get_supercell_matrix)):
@@ -310,19 +319,19 @@ if settings.get_read_fc2() is not None:
     fc.set_fc2_read(settings.get_read_fc2(), rdim=settings.get_supercell_matrix_orig())
     print "##########Checking the invariance conditions for the given force constants#############"
     show_drift_force_constants(fc.get_fc2_read())
-    show_rotational_invariance(fc.get_fc2_read(), supercell=mdfc.supercell)
+    show_rotational_invariance(fc.get_fc2_read(), supercell=mdfc.supercell, log_level = log_level)
     algo = 1
     if algo == 1:
         fc.set_fc2_irreducible_elements(is_trans_inv=settings.get_is_translational_invariance(),
                                         is_rot_inv=settings.get_is_rotational_invariance())
         # fc.set_expand_fc2_conditions()
-        fc.tune_fc2()
+        fc.tune_fc2(log_level=log_level)
     else:
         fc.set_fc2_irreducible_elements()
         fc.set_translational_rotational_invariance()
-    print "##########Checking the invariance conditions for the tuned force constants#############"
+    print "\n##########After tunning, checking the invariance conditions for the tuned force constants#############"
     show_drift_force_constants(fc.get_fc2())
-    show_rotational_invariance(fc.get_fc2(), supercell=mdfc.supercell)
+    show_rotational_invariance(fc.get_fc2(), supercell=mdfc.supercell, log_level=log_level)
 
     if settings.get_read_fc3() is None:
         print_end()

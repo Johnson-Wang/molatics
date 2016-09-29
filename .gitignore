@@ -50,4 +50,5 @@ _build
 #temperary install
 csetup.py
 cmake
-
+*.tar
+*.tar.gz

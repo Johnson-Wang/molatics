@@ -433,7 +433,8 @@ def show_drift_force_constants(force_constants, name="force constants"):
 
 def show_rotational_invariance(force_constants,
                                supercell,
-                               symprec=1e-5):
+                               symprec=1e-5,
+                               log_level=1):
     """
     *** Under development ***
     Just show how force constant is close to the condition of rotational invariance,
@@ -446,6 +447,8 @@ def show_rotational_invariance(force_constants,
     eijk = np.zeros((3,3,3), dtype="intc")
     eijk[0,1,2] = eijk[1,2,0] = eijk[2,0,1] = 1
     eijk[0,2,1] = eijk[2,1,0] = eijk[1,0,2] = -1 # epsilon matrix, which is an antisymmetric 3 * 3 * 3 tensor
+
+    stress = np.zeros((3, 3), dtype='double')
     for pi, p in enumerate(unit_atoms):
         for i in range(3):
             mat = np.zeros((3, 3), dtype='double')
@@ -458,10 +461,15 @@ def show_rotational_invariance(force_constants,
                     for k in range(3):
                         mat[j, k] += (fc[p, s, i, j] * v[k] -
                                       fc[p, s, i, k] * v[j])
-
-            print "Atom %d %s" % (p+1, abc[i])
-            for vec in mat:
-                print "%10.5f %10.5f %10.5f" % tuple(vec)
+            stress += np.abs(mat)
+            if log_level == 2:
+                print "Atom %d %s" % (p+1, abc[i])
+                for vec in mat:
+                    print "%10.5f %10.5f %10.5f" % tuple(vec)
+    if log_level == 1:
+        print "System stress residue(eV/A)"
+        for vec in stress:
+            print "%10.5f %10.5f %10.5f" % tuple(vec)
 
     Momentum = np.zeros((3,3,3,3), dtype='double')
     for s1 in unit_atoms:
@@ -473,6 +481,10 @@ def show_rotational_invariance(force_constants,
                 Momentum += -np.einsum('ij, k, l->ijkl', fc[s1, s2], v12, v12)  / len(vec12s) / 4.
     Momentum = Momentum.reshape(9,9)
     Momentum = Momentum - Momentum.T
-    print 'Born-Huang rotational invariance condition (eV)'
-    for i in range(9):
-        print "%10.5f " * 9 %tuple(Momentum[i])
+    if log_level == 2:
+        print 'Born-Huang rotational invariance condition (eV)'
+        for i in range(9):
+            print "%10.5f " * 9 %tuple(Momentum[i])
+    elif log_level == 1:
+        M_sum = np.abs(Momentum).sum()
+        print 'Born-Huang rotational invariance condition (eV): %10.5f' %M_sum

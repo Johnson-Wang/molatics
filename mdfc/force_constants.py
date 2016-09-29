@@ -550,7 +550,7 @@ class ForceConstants():
             pp = np.einsum('ijkl, ijl-> ijk', self._coeff2, fc2_reduced[self._ifc2_map].reshape(self._num_atom, self._num_atom, 9)).reshape(self._num_atom, self._num_atom, 3, 3)
         sys.stdout.flush()
 
-    def tune_fc2(self, is_minimize_relative_error=False):
+    def tune_fc2(self, is_minimize_relative_error=False, log_level=1):
         len_element = len(self._ifc2_ele)
         transform = np.zeros((self._num_atom, self._num_atom, 9, len_element), dtype='double')
         for i, j in np.ndindex((self._num_atom, self._num_atom)):
@@ -582,11 +582,17 @@ class ForceConstants():
         self._fc2 = fc_tuned.reshape(self._num_atom, self._num_atom, 3, 3)
         print "FC2 tunning process using the least-square method has completed"
         print "    with least square error: %f (eV/A^2)" %error
-        if DEBUG:
+        if log_level == 2:
+            print "The comparison between original and the tuned force constants is plot and saved to f2-tune_compare.pdf"
             plt.figure()
             plt.scatter(self._fc2_read.flatten(), fc_tuned, color='red', s=3)
             plt.plot(np.array([self._fc2_read.min(), self._fc2_read.max()]),
                      np.array([self._fc2_read.min(), self._fc2_read.max()]), color='blue')
+            threshold = 10 ** np.rint(np.log10(np.abs(self._fc2_read).max() / 1e3))
+            plt.yscale('symlog', linthreshy=threshold)
+            plt.xscale('symlog', linthreshx=threshold)
+            plt.xlabel("Original fc2 (eV/A^2)")
+            plt.ylabel("Tuned fc2 (eV/A^2)")
             plt.savefig("fc_tune_compare.pdf")
         write_fc2_hdf5(self._fc2, filename='fc2-tuned.hdf5')
 
