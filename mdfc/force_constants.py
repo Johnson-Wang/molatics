@@ -3,15 +3,24 @@ import sys
 # from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
 from phonopy.structure.cells import get_supercell, get_reduced_bases
 from fc2 import get_atom_mapping, get_pairs_with_permute, get_fc2_coefficients, get_fc2_spg_invariance,\
-    get_fc2_translational_invariance, get_fc2_rotational_invariance, expand_fc2_conditions
+    get_fc2_translational_invariance, get_fc2_rotational_invariance, get_trim_fc2
 from fc3 import get_bond_symmetry, get_irreducible_triplets_with_permute, get_fc3_coefficients, get_fc3_spg_invariance,\
-    get_fc3_translational_invariance, get_fc3_rotational_invariance
+    get_fc3_translational_invariance, get_fc3_rotational_invariance, get_trim_fc3
 from file_IO import read_fc2_from_hdf5, read_fc3_from_hdf5, write_fc2_hdf5, write_fc3_hdf5
 from realmd.information import timeit
 import matplotlib.pyplot as plt
 DEBUG = False
 
 search_directions = np.array(list(np.ndindex((3,3,3)))) - 1
+
+def check_descrepancy(fc, fc_orig, info='', threshold=1):
+    error = np.sqrt(np.sum((fc_orig - fc) ** 2))
+    if error > threshold:
+        print "##################################################################################"
+        print "Largest %s drift from the original irreducible fc2:%15.5e" %(info, error)
+        print "Warning! This %s invariance creates somewhat too strict constraints" %info
+        print "Maybe you want to lower the precesion standard to tolerate more noise"
+        print "##################################################################################"
 
 # Helper methods
 def get_equivalent_smallest_vectors(atom_number_supercell,
@@ -82,6 +91,8 @@ class ForceConstants():
         self._cutoff = cutoff
         self._pairs_reduced = None
         self._pairs_included = None
+        self._triplets_included = None
+        self._triplets_reduced = None
         self._fc2 = None
         self._fc2_read = None
         self._fc3_read = None
@@ -348,8 +359,7 @@ class ForceConstants():
         independents['mapping_operations'] = sym.get_map_operations()
         self._ind1 = independents
 
-    def set_second_independents(self, pair_included=None):
-        "pair_included is a natom_super * natom_super matrix determing whether fc2 between any two atoms in the supercell is included"
+    def set_second_independents(self):
         symprec = self._symmetry.get_symmetry_tolerance()
         positions = self._supercell.get_scaled_positions()
         indep = {}
@@ -379,13 +389,9 @@ class ForceConstants():
         indep['mapping_operations'] = mapping_operations
         indep['natoms'] = np.array([len(np.unique(mappings[i])) for i in range(self._ind1['natoms'])], dtype="intc")
         ind_atom2 = np.zeros((self._ind1['natoms'], np.max(indep['natoms'])), dtype="intc")
-        included_atom2 = np.ones_like(ind_atom2, dtype="bool")
         for i, atom1 in enumerate(self._ind1['atoms']):
             ind_atom2[i, :indep['natoms'][i]] = np.unique(mappings[i])
-            if pair_included is not None:
-                included_atom2[i,:indep['natoms'][i]] = pair_included[atom1, np.unique(mappings[i])]
         indep['atoms'] = ind_atom2
-        indep['included'] = included_atom2
         self._ind2 = indep
         pairs = []
         for i, atom1 in enumerate(self._ind1['atoms']):
@@ -394,11 +400,14 @@ class ForceConstants():
         self._pairs = pairs
 
     def set_pair_reduced_included(self, pair_inclusion=None):
-        pairs_included = np.ones(len(self._pairs_reduced), dtype=bool)
-        if pair_inclusion is not  None:
-            for i, (atom1, atom2) in enumerate(self._pairs_reduced):
-                pairs_included[i] = pair_inclusion[atom1, atom2]
-        self._pairs_included = pairs_included
+        if pair_inclusion is None:
+            pair_inclusion = np.ones(len(self._pairs_reduced), dtype=bool)
+        self._pairs_included = pair_inclusion
+
+    def set_triplet_reduced_included(self, triplet_inclusion=None):
+        if triplet_inclusion is None:
+            triplet_inclusion = np.ones(len(self._triplets_reduced), dtype=bool)
+        self._triplets_included = triplet_inclusion
 
     def get_irreducible_fc2s_with_permute(self):
         ind1 = self._ind1
@@ -439,7 +448,7 @@ class ForceConstants():
         ind1 = self._ind1
         ind2 = self._ind2
         self._ifc2_ele, self._ifc2_trans = \
-            get_fc2_spg_invariance(np.array(self._pairs_reduced)[np.where(self._pairs_included)],
+            get_fc2_spg_invariance(np.array(self._pairs_reduced),
                                    self._supercell.get_scaled_positions(),
                                    ind1['rotations'],
                                    ind1['translations'],
@@ -463,16 +472,9 @@ class ForceConstants():
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
         self._ifc2_trans = np.dot(self._ifc2_trans, transform_tmp)
         #checking the results of gaussian elimination
-
         if self._fc2_read is not None:
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
-            error = fc2_irr_orig - np.dot(transform_tmp, fc2_irr_new)
-            if np.sqrt(np.sum(error ** 2)) > 1:
-                print "##################################################################################"
-                print "Largest translational drift from the original irreducible fc2:%15.5e" %np.sqrt(np.sum(error ** 2))
-                print "Warning! The translational invariance creates somewhat too strict constraints"
-                print "Maybe you want to lower the precesion standard to tolerate more noise"
-                print "##################################################################################"
+            check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='translational')
 
 
     def get_fc2_rotational_invariance(self):
@@ -491,56 +493,61 @@ class ForceConstants():
         self._ifc2_trans = np.dot(self._ifc2_trans, transform_tmp)
         if self._fc2_read is not None:
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
-            error = fc2_irr_orig - np.dot(transform_tmp, fc2_irr_new)
-            if np.sqrt(np.sum(error ** 2)) > 1:
-                print "##################################################################################"
-                print "Largest rotational drift from the original irreducible fc2:%15.5e" %np.sqrt(np.sum(error ** 2))
-                print "Warning! This rotational invariance creates somewhat too strict constraints"
-                print "Maybe you want to lower the precesion standard to tolerate more noise"
-                print "##################################################################################"
+            check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='rotational')
 
-    def set_expand_fc2_conditions(self):
+    def set_trim_fc2(self):
+        if self._fc2_read is not None:
+            fc2_reduced_pair = np.array([self._fc2_read[pair] for pair in self._pairs_reduced])
+            fc2_irr_orig = fc2_reduced_pair.flatten()[self._ifc2_ele]
+
         irreducible_tmp, transform_tmp = \
-            expand_fc2_conditions(self._supercell,
-                                  self._ifc2_trans,
-                                  self._coeff2,
-                                  self._ifc2_map,
-                                  symprec=self._symprec,
-                                  precesion=self._precision)
+            get_trim_fc2(self._supercell,
+                         self._ifc2_trans,
+                         self._coeff2,
+                         self._ifc2_map,
+                         symprec=self._symprec,
+                         precesion=self._precision,
+                         pairs_included=self._pairs_included)
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
         self._ifc2_trans = np.dot(self._ifc2_trans, transform_tmp)
-        print "Maximum interaction distance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+        if self._fc2_read is not None:
+            fc2_irr_new = fc2_irr_orig[irreducible_tmp]
+            check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='trimming')
 
     def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False):
         self.set_first_independents()
         print "Under the system symmetry"
         print "Number of first independent atoms: %4d" % self._ind1['natoms']
-        self.set_second_independents(pair_included=self._cutoff.get_pair_inclusion())
+        self.set_second_independents()
         print "Number of second independent atoms" + " %4d" * len(self._ind2['natoms']) % tuple(self._ind2['natoms'])
         self.get_irreducible_fc2s_with_permute()
         print "Permutation symmetry reduces number of irreducible pairs from %4d to %4d"\
               %(self._ind2['natoms'].sum(), len(self._pairs_reduced))
-        if (self._cutoff is not None) and (self._cutoff.get_cutoff_pair() is not None):
-            pair_inclusion = self._cutoff.get_pair_inclusion()
+
+        if (self._cutoff is not None) and (self._cutoff.get_cutoff_radius()is not None):
+            pair_inclusion = self._cutoff.get_pair_inclusion(pairs=self._pairs_reduced)
             self.set_pair_reduced_included(pair_inclusion)
             print "The artificial cutoff reduces number of irreducible pairs from %4d to %4d"\
                   %(len(self._pairs_reduced), np.sum(self._pairs_included))
         else:
             self.set_pair_reduced_included()
+
         print "Calculating transformation coefficients..."
-        print "Number of independent fc2 components: %d" %(np.sum(self._pairs_included)*9)
-        self.get_irreducible_fc2_components_with_spg()
         self.get_fc2_coefficients()
 
+        print "Number of independent fc2 components: %d" %(len(self._pairs_reduced)*9)
+        self.get_irreducible_fc2_components_with_spg()
         print "Point group invariance reduces independent fc2 components to %d" %(len(self._ifc2_ele))
         sys.stdout.flush()
-        if self._cutoff is None or self._cutoff._cut_pair is None:
-            if is_trans_inv:
-                self.get_fc2_translational_invariance()
-                print "Translational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
-            if is_rot_inv:
-                self.get_fc2_rotational_invariance()
-                print "Rotational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+        if is_trans_inv:
+            self.get_fc2_translational_invariance()
+            print "Translational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+        if is_rot_inv:
+            self.get_fc2_rotational_invariance()
+            print "Rotational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+        if not np.all(self._pairs_included):
+            self.set_trim_fc2()
+            print "Interaction distance cutoff further reduces independent fc2 components to %d" %len(self._ifc2_ele)
         print "Independent fc2 components calculation completed"
         if DEBUG:
             from mdfc.file_IO import read_fc2_from_hdf5
@@ -607,9 +614,8 @@ class ForceConstants():
         transform2 = transform.reshape(-1, len_element)
         fc3_read = self._fc3_read[first_atoms].flatten()
         try:
-            raise ImportError
             import scipy
-            non_zero = np.where(np.abs(transform2) > 1e-8)
+            non_zero = np.where(np.abs(transform2) > self._precision / 1e3)
             transform_sparse = scipy.sparse.coo_matrix((transform2[non_zero], non_zero), shape=transform2.shape)
             lsqr_results = scipy.sparse.linalg.lsqr(transform_sparse, fc3_read)
             self._fc3_irred = lsqr_results[0]
@@ -637,30 +643,27 @@ class ForceConstants():
         print "Number of 3rd IFC: %d" %(27 * len(self._triplets))
         self.get_irreducible_fc3s_with_permute()
         print "Permutation reduces 3rd IFC to %d"%(27 * len(self._triplets_reduced))
+        if (self._cutoff is not None) and (self._cutoff.get_cutoff_radius() is not None):
+            triplets_inclusion = self._cutoff.get_triplet_inclusion(triplets=self._triplets_reduced)
+            self.set_triplet_reduced_included(triplets_inclusion)
+            print "The artificial cutoff reduces number of irreducible pairs from %4d to %4d"\
+                  %(len(self._triplets_reduced), np.sum(self._triplets_included))
+        else:
+            self.set_triplet_reduced_included()
         self.get_irreducible_fc3_components_with_spg()
         print "spg invariance reduces 3rd IFC to %d"%(len(self._ifc3_ele))
         print "Calculating fc3 coefficient..."
         self.get_fc3_coefficients()
-        if DEBUG:
-            fc3_read = self._fc3_read
-            fc3_reduced_triplets = np.double([fc3_read[index] for index in self._triplets_reduced])
-            for i, j, k in np.ndindex((self._num_atom, self._num_atom, self._num_atom)):
-                fc3_triplet = np.dot(self._coeff3[i,j,k], fc3_reduced_triplets[self._ifc3_map[i,j,k]].flatten())
-                fc3_orig = fc3_read[i,j,k]
-                diff = fc3_orig.flatten() - fc3_triplet
-                if (np.abs(diff) > 1e-1).any():
-                    print np.abs(diff).max()
         if is_trans_inv:
+            print "Reducing the number of fc3s by considering translational invariance"
             self.get_fc3_translational_invariance()
             print "translational invariance reduces 3rd IFC to %d"%(len(self._ifc3_ele))
-        if DEBUG:
-            fc3_read = self._fc3_read
-            fc3_reduced_triplets = np.double([fc3_read[index] for index in self._triplets_reduced])
-            fc3_irr = fc3_reduced_triplets.flatten()[self._ifc3_ele]
-            fc3_reduced_triplets2 = np.dot(self._ifc3_trans, fc3_irr)
         if is_rot_inv and self._fc2 is not None:
             self.get_fc3_rotational_invariance(self._fc2)
             print "rotational invariance reduces 3rd IFC to %d"%(len(self._ifc3_ele))
+        if not np.all(self._triplets_included):
+            self.set_trim_fc3()
+            print "Interaction distance cutoff further reduces independent fc3 components to %d" %len(self._ifc3_ele)
         self._num_irred_fc3 = len(self._ifc3_ele)
         sys.stdout.flush()
 
@@ -681,7 +684,6 @@ class ForceConstants():
                     fc3[atom1, atom2, atom3] = np.dot(coeff_temp, self._fc3_irred).reshape(3,3,3)
         self._fc3 = fc3
 
-
     @timeit
     def set_third_independents(self):
         symprec = self._symmetry.get_symmetry_tolerance()
@@ -690,7 +692,7 @@ class ForceConstants():
             self.set_first_independents()
         ind1 = self._ind1
         if self._ind2 == None:
-            self.set_second_independents(self._cutoff.get_pair_inclusion())
+            self.set_second_independents()
         ind2 = self._ind2
         ind3 = {}
         nind_atoms = np.zeros_like(ind2['atoms'])
@@ -812,7 +814,6 @@ class ForceConstants():
                                          ind3['mapping_operations'].astype("intc"),
                                          self._symprec)
 
-
     @timeit
     def get_irreducible_fc3_components_with_spg(self, lang="C"):
         ind1 = self._ind1
@@ -871,13 +872,7 @@ class ForceConstants():
         self._ifc3_trans = np.dot(self._ifc3_trans, transform_tmp)
         if self._fc3_read is not None:
             fc3_irr_new = fc3_irr_orig[irreducible_tmp]
-            error = fc3_irr_orig - np.dot(transform_tmp, fc3_irr_new)
-            if np.sqrt(np.sum(error ** 2)) > 1:
-                print "##################################################################################"
-                print "Largest rotational drift from the original irreducible fc2:%15.5e" %np.sqrt(np.sum(error ** 2))
-                print "Warning! This rotational invariance creates somewhat too strict constraints"
-                print "Maybe you want to lower the precesion standard to tolerate more noise"
-                print "##################################################################################"
+            check_descrepancy(np.dot(transform_tmp, fc3_irr_new), fc3_irr_orig, info="translational")
 
     def get_fc3_rotational_invariance(self, fc2):
         if self._fc3_read is not None:
@@ -895,13 +890,25 @@ class ForceConstants():
         self._ifc3_trans = np.dot(self._ifc3_trans, transform_tmp)
         if self._fc3_read is not None:
             fc3_irr_new = fc3_irr_orig[irreducible_tmp]
-            error = fc3_irr_orig - np.dot(transform_tmp, fc3_irr_new)
-            if np.sqrt(np.sum(error ** 2)) > 1:
-                print "##################################################################################"
-                print "Largest rotational drift from the original irreducible fc2:%15.5e" %np.sqrt(np.sum(error ** 2))
-                print "Warning! This rotational invariance creates somewhat too strict constraints"
-                print "Maybe you want to lower the precesion standard to tolerate more noise"
-                print "##################################################################################"
+            check_descrepancy(np.dot(transform_tmp, fc3_irr_new), fc3_irr_orig, info="rotational")
+
+    def set_trim_fc3(self):
+        if self._fc3_read is not None:
+            fc3_reduced_pair = np.array([self._fc3_read[triplet] for triplet in self._triplets_reduced])
+            fc3_irr_orig = fc3_reduced_pair.flatten()[self._ifc3_ele]
+        irreducible_tmp, transform_tmp = \
+            get_trim_fc3(self._supercell,
+                         self._ifc3_trans,
+                         self._coeff3,
+                         self._ifc3_map,
+                         symprec=self._symprec,
+                         precision=self._precision,
+                         triplets_included=self._triplets_included)
+        self._ifc3_ele = self._ifc3_ele[irreducible_tmp]
+        self._ifc3_trans = np.dot(self._ifc3_trans, transform_tmp)
+        if self._fc3_read is not None:
+            fc3_irr_new = fc3_irr_orig[irreducible_tmp]
+            check_descrepancy(np.dot(transform_tmp, fc3_irr_new), fc3_irr_orig, info="trimming")
 
 def set_translational_invariance(force_constants):
     """

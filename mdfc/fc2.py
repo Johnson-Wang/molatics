@@ -241,26 +241,34 @@ def get_fc2_translational_invariance(supercell, trans, coeff, ifc_map, precesion
     CC, transform, independent = gaussian(np.array(ti_transforms), precesion)
     return independent, transform
 
-def expand_fc2_conditions(supercell,
-                          trans,
-                          coeff,
-                          ifc_map,
-                          symprec,
-                          precesion=1e-5):
+def get_trim_fc2(supercell,
+                 trans,
+                 coeff,
+                 ifc_map,
+                 symprec,
+                 precesion=1e-5,
+                 pairs_included=None,
+                 is_trim_boundary=False):
     unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
     natom = supercell.get_number_of_atoms()
     ti_transforms =[]
     for i, atom1 in enumerate(unit_atoms):
         for atom2 in np.arange(natom):
-            dist = get_equivalent_smallest_vectors(atom2, atom1, supercell, supercell.get_cell(), symprec=symprec)
-            if len(dist) > 1:
+            is_trim = False
+            if pairs_included is not None and not pairs_included[ifc_map[atom1, atom2]]:
+                is_trim = True
+            if is_trim_boundary:
+                dist = get_equivalent_smallest_vectors(atom2, atom1, supercell, supercell.get_cell(), symprec=symprec)
+                if len(dist) > 1:
+                    is_trim = True
+            if is_trim:
                 irred_doublet = ifc_map[atom1, atom2]
                 ti_transform = np.dot(coeff[atom1, atom2], trans[irred_doublet])
                 for k in range(9):
                     if not (np.abs(ti_transform[k])< precesion).all():
                         ti_transform_row = ti_transform[k] / np.abs(ti_transform[k]).max()
                         ti_transforms.append(ti_transform_row)
-    print "Number of constraints of fc2 from maximum interaction distance cutoff:%d"%len(ti_transforms)
+    print "Number of constraints of fc2 from a cutoff of interaction distance:%d"%len(ti_transforms)
     CC, transform, independent = gaussian(np.array(ti_transforms), precesion)
     return independent, transform
 

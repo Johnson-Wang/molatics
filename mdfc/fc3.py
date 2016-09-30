@@ -261,8 +261,6 @@ def get_fc3_translational_invariance(supercell,
                 ti_transform += np.dot(coeff[atom1, atom2, atom3], transform) # transform maps from irreducible elements while coeff maps from irreducible triplets
             for k in range(27):
                 if not (np.abs(ti_transform[k])< precision).all():
-                    # ti_transform_temp = ti_transform[k] / np.abs(ti_transform[k]).max()
-                    # ti_transforms.append(ti_transform_temp)
                     argmax = np.argmax(np.abs(ti_transform[k]))
                     ti_transform[k] /= ti_transform[k, argmax]
                     is_exist = np.all(np.abs(ti_transform[k] - np.array(ti_transforms)) < precision, axis=1)
@@ -280,6 +278,54 @@ def get_fc3_translational_invariance(supercell,
     except ImportError:
         CC, transform, independent = gaussian(np.array(ti_transforms, dtype='double'), prec=precision)
     return independent, transform
+
+
+def get_trim_fc3(supercell,
+                 trans,
+                 coeff,
+                 ifc_map,
+                 symprec,
+                 precision=1e-5,
+                 triplets_included=None,
+                 is_trim_boundary=False):
+    unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
+    natom = supercell.get_number_of_atoms()
+    num_irred = trans.shape[-1]
+    zero_fc3s =[np.zeros(num_irred, dtype='double')]
+    for i, atom1 in enumerate(unit_atoms):
+        for atom2 in np.arange(natom):
+            for atom3 in np.arange(natom):
+                is_trim = False
+                if triplets_included is not None and not triplets_included[ifc_map[atom1, atom2, atom3]]:
+                    is_trim = True
+                if is_trim_boundary:
+                    dist12 = get_equivalent_smallest_vectors(atom2, atom1, supercell, supercell.get_cell(), symprec=symprec)
+                    dist23 = get_equivalent_smallest_vectors(atom3, atom2, supercell, supercell.get_cell(), symprec=symprec)
+                    dist13 = get_equivalent_smallest_vectors(atom3, atom1, supercell, supercell.get_cell(), symprec=symprec)
+                    if len(dist12) > 1 or len(dist23) > 1 or len(dist13) > 1:
+                        is_trim = True
+                if is_trim:
+                    irred_doublet = ifc_map[atom1, atom2, atom3]
+                    zero_fc3 = np.dot(coeff[atom1, atom2, atom3], trans[irred_doublet])
+                    for k in range(27):
+                        if not (np.abs(zero_fc3[k])< precision).all():
+                            argmax = np.argmax(np.abs(zero_fc3[k]))
+                            zero_fc3[k] /= zero_fc3[k, argmax]
+                            is_exist = np.all(np.abs(zero_fc3[k] - np.array(zero_fc3s)) < precision, axis=1)
+                            if (is_exist == False).all():
+                                zero_fc3s.append(zero_fc3[k] / zero_fc3[k, argmax])
+    print "Number of constraints of fc3 from a cutoff of interaction distance:%d"% (len(zero_fc3s) - 1)
+    try:
+        import _mdfc
+        transform = np.zeros((num_irred, num_irred), dtype='double')
+        independent = np.zeros(num_irred, dtype='intc')
+        num_independent = _mdfc.gaussian(transform, np.array(zero_fc3s, dtype='double'), independent, precision)
+        transform = transform[:, :num_independent]
+        independent = independent[:num_independent]
+    except ImportError:
+        CC, transform, independent = gaussian(np.array(zero_fc3s, dtype='double'), prec=precision)
+    return independent, transform
+
 
 def get_fc3_rotational_invariance(fc2, supercell, trans, coeff, ifc_map, symprec=1e-5, precision=1e-6):
     precision *= 1e3

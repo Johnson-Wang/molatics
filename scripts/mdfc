@@ -76,8 +76,6 @@ parser = OptionParser()
 parser.set_defaults(
     interface = None,
     cutoff_radius=None,
-    cutoff_pair=None,
-    cutoff_triplet=None,
     cutoff_disp="", # A. cutoff displacement distance, data above this cutoff is ignored in predicting new positions
     read_fc2 = None,
     read_fc3 = None,
@@ -122,10 +120,6 @@ parser.add_option("--interface", dest="interface",
                   help="The interface of input and output files")
 parser.add_option("--cr", "--cutoff_radius", dest="cutoff_radius", type="string",
                   help="Out of cutoff radius, force constants are set zero.")
-parser.add_option("--cp", "--cutoff_pair", dest="cutoff_pair", type="string",
-                  help="Set the cutoff distance between a pair of atoms for fc2 (of the same of different species)")
-parser.add_option("--ct", "--cutoff_triplet", dest="cutoff_triplet", type="string",
-                  help="Set the cutoff distance amongst a triplet of atoms for fc3 (of the same of different species)")
 parser.add_option("--cd", "--cutoff_disp", dest="cutoff_disp", type="string",
                   help="Set the cutoff distance for the displacements. Data above the cutoff is ignored in predicting new equilibrium positions")
 parser.add_option("--dim", dest="supercell_dimension",
@@ -286,8 +280,6 @@ mdfc = MDFC(unitcell,
           factor=factor,
           symprec=options.symprec,
           cutoff_radius=settings.get_cutoff_radius(),
-          cutoff_pair=settings.get_cutoff_pair(),
-          cutoff_triplet=settings.get_cutoff_triplet(),
           cutoff_force=settings.get_cutoff_residual_force(),
           cutoff_disp=settings.get_cutoff_disp(),
           is_symmetry=settings.get_is_symmetry(),
@@ -324,7 +316,6 @@ if settings.get_read_fc2() is not None:
     if algo == 1:
         fc.set_fc2_irreducible_elements(is_trans_inv=settings.get_is_translational_invariance(),
                                         is_rot_inv=settings.get_is_rotational_invariance())
-        # fc.set_expand_fc2_conditions()
         fc.tune_fc2(log_level=log_level)
     else:
         fc.set_fc2_irreducible_elements()
@@ -339,7 +330,6 @@ if settings.get_read_fc2() is not None:
 
 if settings.get_read_fc3() is not None:
     print "##########%s is read and tunned to satisfy symmetry conditions#############" %settings.get_read_fc3()
-
     fc = mdfc.fc
     fc.set_fc3_read(settings.get_read_fc3())
     show_drift_fc3(fc._fc3_read)

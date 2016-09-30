@@ -28,8 +28,6 @@ class Settings:
         self._primitive_matrix = np.eye(3, dtype=float)
         self._run_mode = None
         self._cutoff_radius = None
-        self._cutoff_pair = None
-        self._cutoff_triplet = None
         self._cutoff_disp = None
         self._supercell_matrix = None
         self._supercell_matrix_orig = None
@@ -159,18 +157,6 @@ class Settings:
     def get_cutoff_radius(self):
         return self._cutoff_radius
 
-    def set_cutoff_pair(self, cutoff_pair):
-        self._cutoff_pair = cutoff_pair
-
-    def get_cutoff_pair(self):
-        return self._cutoff_pair
-
-    def set_cutoff_triplet(self, cutoff_triplet):
-        self._cutoff_triplet = cutoff_triplet
-
-    def get_cutoff_triplet(self):
-        return self._cutoff_triplet
-
     def set_cutoff_disp(self, cutoff_disp):
         self._cutoff_disp = cutoff_disp
 
@@ -291,12 +277,6 @@ class ConfParser:
         if params.has_key('cutoff_radius'):
             self._settings.set_cutoff_radius(params['cutoff_radius'])
 
-        if params.has_key('cutoff_pair'):
-            self._settings.set_cutoff_pair(params['cutoff_pair'])
-
-        if params.has_key('cutoff_triplet'):
-            self._settings.set_cutoff_triplet(params['cutoff_triplet'])
-
         if params.has_key('cutoff_disp'):
             self._settings.set_cutoff_disp(params['cutoff_disp'])
 
@@ -393,10 +373,6 @@ class ConfParser:
             if opt.dest == 'cutoff_radius':
                 if self._options.cutoff_radius:
                     self._confs['cutoff_radius'] = self._options.cutoff_radius
-
-            if opt.dest == 'cutoff_pair':
-                if self._options.cutoff_pair:
-                    self._confs['cutoff_pair'] = self._options.cutoff_pair
 
             if opt.dest == 'cutoff_disp':
                 if self._options.cutoff_disp:
@@ -538,14 +514,6 @@ class ConfParser:
             if conf_key == 'cutoff_radius':
                 val = map(float, confs['cutoff_radius'].strip().replace(",", " ").split())
                 self.set_parameter('cutoff_radius', val)
-
-            if conf_key == 'cutoff_pair':
-                val = map(float, confs['cutoff_pair'].strip().replace(",", " ").split())
-                self.set_parameter('cutoff_pair', val)
-
-            if conf_key == 'cutoff_triplet':
-                val = map(float, confs['cutoff_triplet'].strip().replace(",", " ").split())
-                self.set_parameter('cutoff_triplet', val)
 
             if conf_key == 'cutoff_disp':
                 val = map(float, confs['cutoff_disp'].strip().replace(",", " ").split())
