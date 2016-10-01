@@ -506,7 +506,7 @@ class ForceConstants():
                          self._coeff2,
                          self._ifc2_map,
                          symprec=self._symprec,
-                         precesion=self._precision,
+                         precision=self._precision,
                          pairs_included=self._pairs_included)
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
         self._ifc2_trans = np.dot(self._ifc2_trans, transform_tmp)
@@ -650,10 +650,10 @@ class ForceConstants():
                   %(len(self._triplets_reduced), np.sum(self._triplets_included))
         else:
             self.set_triplet_reduced_included()
-        self.get_irreducible_fc3_components_with_spg()
-        print "spg invariance reduces 3rd IFC to %d"%(len(self._ifc3_ele))
         print "Calculating fc3 coefficient..."
         self.get_fc3_coefficients()
+        self.get_irreducible_fc3_components_with_spg()
+        print "spg invariance reduces 3rd IFC to %d"%(len(self._ifc3_ele))
         if is_trans_inv:
             print "Reducing the number of fc3s by considering translational invariance"
             self.get_fc3_translational_invariance()
@@ -671,17 +671,30 @@ class ForceConstants():
         coeff = self._coeff3
         ifcmap = self._ifc3_map
         trans = self._ifc3_trans
-        num_irred = trans.shape[-1]
         assert self._fc3_irred is not None
+        s2u_map = self._supercell.get_supercell_to_unitcell_map()
+        scaled_positions = self._supercell.get_scaled_positions()
         # distribute all the fc3s
         print "Distributing fc3..."
         fc3 = np.zeros((self._num_atom, self._num_atom, self._num_atom, 3,3,3), dtype="double")
-        for atom1 in np.arange(self._num_atom):
+        for atom1 in np.unique(s2u_map):
             for atom2 in np.arange(self._num_atom):
                 for atom3 in np.arange(self._num_atom):
                     num_triplet = ifcmap[atom1, atom2, atom3]
-                    coeff_temp = np.dot(coeff[atom1, atom2, atom3], trans[num_triplet]).reshape(3,3,3, num_irred)
-                    fc3[atom1, atom2, atom3] = np.dot(coeff_temp, self._fc3_irred).reshape(3,3,3)
+                    fc3_irred_tmp = np.dot(trans[num_triplet], self._fc3_irred)
+                    fc3[atom1, atom2, atom3] = np.dot(coeff[atom1, atom2, atom3], fc3_irred_tmp).reshape(3,3,3)
+        for atom1 in range(self._num_atom):
+            if atom1 in s2u_map:
+                continue
+            ip = s2u_map[atom1]
+            l = scaled_positions[atom1] - scaled_positions[ip]
+            for atom2 in range(self._num_atom):
+                disp2 = scaled_positions[atom2] - l - scaled_positions
+                jp = np.where(np.all(np.abs(disp2 - np.rint(disp2)) < self._symprec, axis=-1))[0][0]
+                for atom3 in range(self._num_atom):
+                    disp3 = scaled_positions[atom3] - l - scaled_positions
+                    kp = np.where(np.all(np.abs(disp3 - np.rint(disp3)) < self._symprec, axis=-1))[0][0]
+                    fc3[atom1, atom2, atom3] = fc3[ip, jp, kp]
         self._fc3 = fc3
 
     @timeit

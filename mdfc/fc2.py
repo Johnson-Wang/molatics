@@ -246,7 +246,7 @@ def get_trim_fc2(supercell,
                  coeff,
                  ifc_map,
                  symprec,
-                 precesion=1e-5,
+                 precision=1e-5,
                  pairs_included=None,
                  is_trim_boundary=False):
     unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
@@ -265,11 +265,15 @@ def get_trim_fc2(supercell,
                 irred_doublet = ifc_map[atom1, atom2]
                 ti_transform = np.dot(coeff[atom1, atom2], trans[irred_doublet])
                 for k in range(9):
-                    if not (np.abs(ti_transform[k])< precesion).all():
-                        ti_transform_row = ti_transform[k] / np.abs(ti_transform[k]).max()
-                        ti_transforms.append(ti_transform_row)
+                    if not (np.abs(ti_transform[k])< precision).all():
+                        argmax = np.argmax(np.abs(ti_transform[k]))
+                        ti_transform[k] /= ti_transform[k, argmax]
+                        is_exist = np.all(np.abs(ti_transform[k] - np.array(ti_transforms)) < precision, axis=1)
+                        if (is_exist == False).all():
+                            ti_transforms.append(ti_transform[k] / ti_transform[k, argmax])
+
     print "Number of constraints of fc2 from a cutoff of interaction distance:%d"%len(ti_transforms)
-    CC, transform, independent = gaussian(np.array(ti_transforms), precesion)
+    CC, transform, independent = gaussian(np.array(ti_transforms), precision)
     return independent, transform
 
 def get_fc2_rotational_invariance(supercell,

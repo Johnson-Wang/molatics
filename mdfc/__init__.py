@@ -429,8 +429,11 @@ class MolecularDynamicsForceConstant:
 
 
     def set_cutoffs(self, cutoff_radius=None):
-        specie, sequence = np.unique(self._unitcell.get_atomic_numbers(), return_index=True)
-        self._cutoff = Cutoff(specie[np.argsort(sequence)], cutoff_radius)
+        species = []
+        for symbol in self.unitcell.get_chemical_symbols():
+            if symbol not in species:
+                species.append(symbol)
+        self._cutoff = Cutoff(species, cutoff_radius)
         self._cutoff.set_cell(self.supercell, symprec=self._symprec)
 
 
@@ -476,8 +479,6 @@ class MolecularDynamicsForceConstant:
         self._set_of_forces_objects = sets_of_forces_objects
 
 
-
-
 class Cutoff():
     def __init__(self, species, cut_radius):
         self._cell = None
@@ -491,6 +492,10 @@ class Cutoff():
                 self._cut_radius_species = cut_radius
             else:
                 print_error_message("Cutoff radius number %d not equal the number of species %d!" %(len(cut_radius), n))
+            print "Cutoff radius of atoms (A)"
+            for i in range(n):
+                print "%3s: %5.2f;" %(species[i], self._cut_radius_species[i]),
+            print
         else:
             self._cut_radius_species = None
 
