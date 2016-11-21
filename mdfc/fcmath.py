@@ -1,7 +1,19 @@
 import numpy as np
 
+def gaussian(a, prec=1e-6, lang="C"):
+    if lang == "C":
+        import _mdfc
+        column = a.shape[-1]
+        transform = np.zeros((column, column), dtype='double')
+        independent = np.zeros(column, dtype='intc')
+        num_independent = _mdfc.gaussian(transform, a.astype("double"), independent, prec)
+        transform = transform[:, :num_independent]
+        independent = independent[:num_independent]
+        return a, transform, independent
+    else:
+        return gaussian_py(a, prec)
 
-def gaussian(a, prec=1e-6):
+def gaussian_py(a, prec=1e-6):
     """Compute the gaussian elimination with both row and column pivoting
     Parametere
     -------------------------------------------------

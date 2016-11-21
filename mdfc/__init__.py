@@ -487,14 +487,14 @@ class Cutoff():
         self._cut_radius = None
         if cut_radius is not None:
             if len(cut_radius) == 1:
-                self._cut_radius_species = [cut_radius[0] for i in range(n)]
+                self._cut_radius_species = {species[i]:cut_radius[0] for i in range(n)}
             elif len(cut_radius) == n:
-                self._cut_radius_species = cut_radius
+                self._cut_radius_species = {species[i]:cut_radius[i] for i in range(n)}
             else:
                 print_error_message("Cutoff radius number %d not equal the number of species %d!" %(len(cut_radius), n))
             print "Cutoff radius of atoms (A)"
             for i in range(n):
-                print "%3s: %5.2f;" %(species[i], self._cut_radius_species[i]),
+                print "%3s: %5.2f;" %(species[i], self._cut_radius_species[species[i]]),
             print
         else:
             self._cut_radius_species = None
@@ -503,11 +503,11 @@ class Cutoff():
         self._cell = cell
         self._symprec = symprec
         num_atom = self._cell.get_number_of_atoms()
-        species, species_indices = np.unique(cell.get_atomic_numbers(), return_inverse=True)
+        chemical_symbols = self._cell.get_chemical_symbols()
         if self._cut_radius_species is not None:
             self._cut_radius = np.zeros(num_atom, dtype='double')
             for i in range(num_atom):
-                self._cut_radius[i] = self._cut_radius_species[species_indices[i]]
+                self._cut_radius[i] = self._cut_radius_species[chemical_symbols[i]]
         self._pair_distances = None
 
     def get_cutoff_radius(self):
@@ -518,11 +518,11 @@ class Cutoff():
         lattice = self._cell.get_cell()
         min_distances = np.zeros((num_atom, num_atom), dtype='double')
         for i in range(num_atom): # run in cell
-            for j in range(num_atom): # run in primitive
+            for j in range(i): # run in primitive
                 min_distances[i, j] = np.linalg.norm(np.dot(
                         get_equivalent_smallest_vectors(
                             i, j, self._cell, lattice, self._symprec)[0], lattice))
-        self._pair_distances = min_distances
+        self._pair_distances = (min_distances + min_distances.T) / 2.
 
     def get_pair_inclusion(self, pairs=None):
         lattice = self._cell.get_cell()

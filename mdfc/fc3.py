@@ -2,7 +2,7 @@ __author__ = 'xinjiang'
 import numpy as np
 from mdfc.fc2 import get_pairs, get_next_atom, get_atom_sent_by_operation, get_atom_sent_by_site_sym,\
     get_all_operations_at_star, get_rotations_at_star, get_operations_at_star, similarity_transformation
-from mdfc.fcmath import gaussian, similarity_transformation
+from mdfc.fcmath import gaussian_py, similarity_transformation
 from itertools import permutations
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
 
@@ -219,7 +219,7 @@ def get_fc3_spg_invariance(triplets,
                                 if not is_found:
                                     CC.append(row)
         DD = np.array(CC, dtype='double')
-        CC, transform, independent = gaussian(DD)
+        CC, transform, independent = gaussian_py(DD)
         # tt = np.zeros((27, 27), dtype='double')
         # ii = np.zeros(27, dtype='intc')
         # import _mdfc
@@ -276,7 +276,7 @@ def get_fc3_translational_invariance(supercell,
         transform = transform[:, :num_independent]
         independent = independent[:num_independent]
     except ImportError:
-        CC, transform, independent = gaussian(np.array(ti_transforms, dtype='double'), prec=precision)
+        CC, transform, independent = gaussian_py(np.array(ti_transforms, dtype='double'), prec=precision)
     return independent, transform
 
 
@@ -323,7 +323,7 @@ def get_trim_fc3(supercell,
         transform = transform[:, :num_independent]
         independent = independent[:num_independent]
     except ImportError:
-        CC, transform, independent = gaussian(np.array(zero_fc3s, dtype='double'), prec=precision)
+        CC, transform, independent = gaussian_py(np.array(zero_fc3s, dtype='double'), prec=precision)
     return independent, transform
 
 
@@ -371,7 +371,7 @@ def get_fc3_rotational_invariance(fc2, supercell, trans, coeff, ifc_map, symprec
         transform = transform[:, :num_independent]
         independent = independent[:num_independent]
     except ImportError:
-        CC, transform, independent = gaussian(np.array(torques), prec=precision)
+        CC, transform, independent = gaussian_py(np.array(torques), prec=precision)
     return independent, transform
 
 def show_drift_fc3(fc3, name="fc3"):

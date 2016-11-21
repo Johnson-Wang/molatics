@@ -1,8 +1,7 @@
-from mdfc.fcmath import gaussian, similarity_transformation
+from mdfc.fcmath import similarity_transformation, gaussian
 
 __author__ = 'xinjiang'
 import numpy as np
-from realmd.information import timeit
 from itertools import permutations
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
 
@@ -216,7 +215,7 @@ def get_fc2_spg_invariance(pairs_orig,
         trans[i,:, start:start + length] = doub['transform']
     return np.hstack((dic['independent'] for dic in doublets_dict)), trans
 
-def get_fc2_translational_invariance(supercell, trans, coeff, ifc_map, precesion=1e-6):
+def get_fc2_translational_invariance(supercell, trans, coeff, ifc_map, precision=1e-6):
     natom = supercell.get_number_of_atoms()
     unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
     num_irred = trans.shape[-1]
@@ -227,18 +226,18 @@ def get_fc2_translational_invariance(supercell, trans, coeff, ifc_map, precesion
             irred_doublet = ifc_map[atom1, atom2]
             ti_transform += np.dot(coeff[atom1, atom2], trans[irred_doublet])
         for k in range(9):
-            if not (np.abs(ti_transform[k])< precesion).all():
+            if not (np.abs(ti_transform[k])< precision).all():
                 # ti_transform_row = ti_transform[k] / np.abs(ti_transform[k]).max()
                 # ti_transforms.append(ti_transform_row)
                 argmax = np.argmax(np.abs(ti_transform[k]))
                 ti_transform[k] /= ti_transform[k, argmax]
-                is_exist = np.all(np.abs(ti_transform[k] - np.array(ti_transforms)) < precesion, axis=1)
+                is_exist = np.all(np.abs(ti_transform[k] - np.array(ti_transforms)) < precision, axis=1)
                 if (is_exist == False).all():
                     ti_transforms.append(ti_transform[k] / ti_transform[k, argmax])
 
 
     print "Number of constraints of fc2 from translational invariance:%d"% (len(ti_transforms) - 1)
-    CC, transform, independent = gaussian(np.array(ti_transforms), precesion)
+    CC, transform, independent = gaussian(np.array(ti_transforms), precision)
     return independent, transform
 
 def get_trim_fc2(supercell,
@@ -251,7 +250,8 @@ def get_trim_fc2(supercell,
                  is_trim_boundary=False):
     unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
     natom = supercell.get_number_of_atoms()
-    ti_transforms =[]
+    num_irred = trans.shape[-1]
+    ti_transforms =[np.zeros(num_irred)]
     for i, atom1 in enumerate(unit_atoms):
         for atom2 in np.arange(natom):
             is_trim = False
@@ -314,7 +314,6 @@ def get_fc2_rotational_invariance(supercell,
                     torques.append(force[k] / force[k, argmax])
     print "Number of constraints of fc2 from rotational invariance:%d"%(len(torques)-1)
     CC, transform, independent = gaussian(np.array(torques), precision)
-
     if is_Huang:
         precision *= 1e2
         print "The Born-Huang invariance condition is also included in rotational symmetry"
@@ -346,6 +345,7 @@ def get_fc2_rotational_invariance(supercell,
                     torques.append(torque_tmp[i] / torque_tmp[i, argmax])
         print "Number of constraints of fc2 from Born-Huang invariance condition:%d"%(len(torques)-1)
         CC, transform_gw, independent_gw = gaussian(np.array(torques), precision)
+
         independent = np.array([independent[i] for i in independent_gw])
         transform = np.dot(transform,transform_gw)
     return independent, transform
@@ -455,6 +455,7 @@ def show_rotational_invariance(force_constants,
 
     fc = force_constants
     unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
+    volume_unitcell = supercell.get_volume() * len(unit_atoms) / supercell.get_number_of_atoms()
     abc = "xyz"
     eijk = np.zeros((3,3,3), dtype="intc")
     eijk[0,1,2] = eijk[1,2,0] = eijk[2,0,1] = 1
@@ -479,24 +480,24 @@ def show_rotational_invariance(force_constants,
                 for vec in mat:
                     print "%10.5f %10.5f %10.5f" % tuple(vec)
     if log_level == 1:
-        print "System stress residue(eV/A)"
+        print "System stress residue enduced by rigid-body rotations(eV/A)"
         for vec in stress:
             print "%10.5f %10.5f %10.5f" % tuple(vec)
 
-    Momentum = np.zeros((3,3,3,3), dtype='double')
+    ElasticConstants = np.zeros((3,3,3,3), dtype='double')
     for s1 in unit_atoms:
         for s2 in range(supercell.get_number_of_atoms()):
             vec12s = np.array(get_equivalent_smallest_vectors(
                     s2, s1, supercell, supercell.get_cell(), symprec))
             vec12s = np.dot(vec12s, supercell.get_cell())
             for v12 in vec12s:
-                Momentum += -np.einsum('ij, k, l->ijkl', fc[s1, s2], v12, v12)  / len(vec12s) / 4.
-    Momentum = Momentum.reshape(9,9)
-    Momentum = Momentum - Momentum.T
+                ElasticConstants += -np.einsum('ij, k, l->ijkl', fc[s1, s2], v12, v12)  / len(vec12s) / 2.
+    ElasticConstants = ElasticConstants.reshape(9,9)
+    non_sym_tensor = ElasticConstants - ElasticConstants.T
     if log_level == 2:
         print 'Born-Huang rotational invariance condition (eV)'
         for i in range(9):
-            print "%10.5f " * 9 %tuple(Momentum[i])
+            print "%10.5f " * 9 %tuple(non_sym_tensor[i])
     elif log_level == 1:
-        M_sum = np.abs(Momentum).sum()
+        M_sum = np.abs(non_sym_tensor).sum()
         print 'Born-Huang rotational invariance condition (eV): %10.5f' %M_sum

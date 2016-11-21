@@ -468,7 +468,7 @@ class ForceConstants():
                                              self._ifc2_trans,
                                              self._coeff2,
                                              self._ifc2_map,
-                                             precesion=self._precision)
+                                             precision=self._precision)
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
         self._ifc2_trans = np.dot(self._ifc2_trans, transform_tmp)
         #checking the results of gaussian elimination
