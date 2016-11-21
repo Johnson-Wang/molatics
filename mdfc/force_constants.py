@@ -1,12 +1,11 @@
 import numpy as np
 import sys
-# from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
-from phonopy.structure.cells import get_supercell, get_reduced_bases
 from fc2 import get_atom_mapping, get_pairs_with_permute, get_fc2_coefficients, get_fc2_spg_invariance,\
     get_fc2_translational_invariance, get_fc2_rotational_invariance, get_trim_fc2
 from fc3 import get_bond_symmetry, get_irreducible_triplets_with_permute, get_fc3_coefficients, get_fc3_spg_invariance,\
     get_fc3_translational_invariance, get_fc3_rotational_invariance, get_trim_fc3
 from file_IO import read_fc2_from_hdf5, read_fc3_from_hdf5, write_fc2_hdf5, write_fc3_hdf5
+from fcmath import dot
 from realmd.information import timeit
 import matplotlib.pyplot as plt
 DEBUG = False
@@ -19,7 +18,7 @@ def check_descrepancy(fc, fc_orig, info='', threshold=1):
         print "##################################################################################"
         print "Largest %s drift from the original irreducible fc2:%15.5e" %(info, error)
         print "Warning! This %s invariance creates somewhat too strict constraints" %info
-        print "Maybe you want to lower the precesion standard to tolerate more noise"
+        print "Maybe you want to lower the precision standard to tolerate more noise"
         print "##################################################################################"
 
 # Helper methods
@@ -470,7 +469,7 @@ class ForceConstants():
                                              self._ifc2_map,
                                              precision=self._precision)
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
-        self._ifc2_trans = np.dot(self._ifc2_trans, transform_tmp)
+        self._ifc2_trans = dot(self._ifc2_trans, transform_tmp, is_sparse=True)
         #checking the results of gaussian elimination
         if self._fc2_read is not None:
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
@@ -490,7 +489,7 @@ class ForceConstants():
                                           symprec=self._symprec,
                                           precision=self._precision)
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
-        self._ifc2_trans = np.dot(self._ifc2_trans, transform_tmp)
+        self._ifc2_trans = dot(self._ifc2_trans, transform_tmp, is_sparse=True)
         if self._fc2_read is not None:
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='rotational')
@@ -509,7 +508,7 @@ class ForceConstants():
                          precision=self._precision,
                          pairs_included=self._pairs_included)
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
-        self._ifc2_trans = np.dot(self._ifc2_trans, transform_tmp)
+        self._ifc2_trans = dot(self._ifc2_trans, transform_tmp, is_sparse=True)
         if self._fc2_read is not None:
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='trimming')
@@ -580,7 +579,7 @@ class ForceConstants():
             lsqr_results = scipy.sparse.linalg.lsqr(transform_sparse, fc2_read_flatten)
             fc_irred = lsqr_results[0]
             error = lsqr_results[3]
-            fc_tuned = np.dot(transform, fc_irred)
+            fc_tuned = dot(transform, fc_irred, is_sparse=True)
         except ImportError:
             transform_pinv = np.linalg.pinv(transform2)
             fc_irred = np.dot(transform_pinv, fc2_read_flatten)

@@ -1,10 +1,8 @@
-from mdfc.fcmath import similarity_transformation, gaussian
-
 __author__ = 'xinjiang'
 import numpy as np
 from itertools import permutations
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
-
+from mdfc.fcmath import similarity_transformation, gaussian, dot
 def get_next_atom(center, site_symmetry, positions, symprec=1e-5):
     """next_atom: a dict which should at least contain the key 'atom_number'
     site_symmetry: the site_symmetry at the center atom (atom_number)"""
@@ -234,8 +232,6 @@ def get_fc2_translational_invariance(supercell, trans, coeff, ifc_map, precision
                 is_exist = np.all(np.abs(ti_transform[k] - np.array(ti_transforms)) < precision, axis=1)
                 if (is_exist == False).all():
                     ti_transforms.append(ti_transform[k] / ti_transform[k, argmax])
-
-
     print "Number of constraints of fc2 from translational invariance:%d"% (len(ti_transforms) - 1)
     CC, transform, independent = gaussian(np.array(ti_transforms), precision)
     return independent, transform
@@ -317,7 +313,7 @@ def get_fc2_rotational_invariance(supercell,
     if is_Huang:
         precision *= 1e2
         print "The Born-Huang invariance condition is also included in rotational symmetry"
-        trans2 = np.dot(trans, transform)
+        trans2 = dot(trans, transform, is_sparse=True)
         num_irred2 = trans2.shape[-1]
         torques =[np.zeros(num_irred2)]
         unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
