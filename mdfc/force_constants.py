@@ -625,6 +625,7 @@ class ForceConstants():
                     non_zero = np.where(np.abs(transform_tmp) > self._precision / 1e2)
                     for (m, n) in zip(*non_zero):
                         transform_sparse[first_index_tmp + m, n] = transform_tmp[m, n]
+            transform_sparse = transform_sparse.tocoo()
             lsqr_results = scipy.sparse.linalg.lsqr(transform_sparse, fc3_read)
             self._fc3_irred = lsqr_results[0]
             fc_tuned = mat_dot_product(transform_sparse, self._fc3_irred, is_sparse=True)
