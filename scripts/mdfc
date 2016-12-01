@@ -108,6 +108,7 @@ parser.set_defaults(
     step_range="",
     is_convert_input=False,
     divide=1,
+    is_disperse=False,
     verbose=False)
 
 parser.add_option("-c", "--cell", dest="cell_poscar",
@@ -118,7 +119,7 @@ parser.add_option("--count", dest="predict_count",type="int",
 parser.add_option("--interface", dest="interface",
                   action="store", type="string",
                   help="The interface of input and output files")
-parser.add_option("--cr", "--cutoff_radius", dest="cutoff_radius", type="string",
+parser.add_option("--cr", "--cutr","--cutoff_radius", dest="cutoff_radius", type="string",
                   help="Out of cutoff radius, force constants are set zero.")
 parser.add_option("--cd", "--cutoff_disp", dest="cutoff_disp", type="string",
                   help="Set the cutoff distance for the displacements. Data above the cutoff is ignored in predicting new equilibrium positions")
@@ -133,6 +134,9 @@ parser.add_option("--factor", dest="factor", type="float",
 parser.add_option("--fc2", dest="is_fc2",
                   action="store_true",
                   help="Calculate harmonic force constants")
+parser.add_option("--disperse", dest="is_disperse",
+                  action="store_true",
+                  help="Save the the force constants in a dispersed way, which reduces the memory cost")
 parser.add_option("--readfc2", dest="read_fc2",
                   action="store", type='string',
                   help="Read 2nd force constants and tune the elements to satisfy physical (symmetry) conditions")
@@ -192,7 +196,7 @@ parser.add_option("-f", "--ff", "--force_file", dest='force_filename', type="str
                   help="The force file which contain the information of atomic forces")
 parser.add_option("-i", "--cf", "--coordinate_filename", dest='coord_filename', type="string",
                   help="The coordinate file which contain the information of positions of atoms")
-parser.add_option("--format","--file_format", dest="file_format",type="string",
+parser.add_option("--format", "--file_format", dest="file_format",type="string",
                   help='set input file mode from "lammps"(default),"xyz" and "vasp"')
 parser.add_option("--range", "--step_range", dest="step_range", type="string",
                   help="extract only a range of time steps from the original data, e.g. 1000:2000")
@@ -287,6 +291,7 @@ mdfc = MDFC(unitcell,
           count=settings.get_predict_coun(),
           is_translational_invariance=settings.get_is_translational_invariance(),
           is_rotational_invariance=settings.get_is_rotational_invariance(),
+          is_disperse = settings.get_is_disperse(),
           precision=settings.get_precision(),
           log_level=log_level,
           is_hdf5=settings.get_is_hdf5())

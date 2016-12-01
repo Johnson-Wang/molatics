@@ -5,7 +5,7 @@ from fc2 import get_atom_mapping, get_pairs_with_permute, get_fc2_coefficients, 
 from fc3 import get_bond_symmetry, get_irreducible_triplets_with_permute, get_fc3_coefficients, get_fc3_spg_invariance,\
     get_fc3_translational_invariance, get_fc3_rotational_invariance, get_trim_fc3
 from file_IO import read_fc2_from_hdf5, read_fc3_from_hdf5, write_fc2_hdf5, write_fc3_hdf5
-from fcmath import mat_dot_product
+from fcmath import mat_dot_product, mat_dense_to_sparse
 from realmd.information import timeit
 import matplotlib.pyplot as plt
 DEBUG = False
@@ -75,7 +75,7 @@ def get_equivalent_smallest_vectors(atom_number_supercell,
 
 
 class ForceConstants():
-    def __init__(self, supercell, primitive, symmetry, cutoff=None, precision=1e-8):
+    def __init__(self, supercell, primitive, symmetry, is_disperse=False, cutoff=None, precision=1e-8):
         self._symmetry = symmetry
         self._supercell = supercell
         self._primitive = primitive
@@ -88,6 +88,7 @@ class ForceConstants():
         self._precision=precision
         self._lattice = supercell.get_cell().T
         self._cutoff = cutoff
+        self._is_disperse=is_disperse
         self._pairs_reduced = None
         self._pairs_included = None
         self._triplets_included = None
@@ -608,26 +609,47 @@ class ForceConstants():
     def tune_fc3(self):
         len_element = len(self._ifc3_ele)
         first_atoms = np.unique(self._supercell.get_supercell_to_unitcell_map())
-
-        transform = np.zeros((len(first_atoms), self._num_atom,self._num_atom, 27, len_element), dtype='double')
-        for first, i in enumerate(first_atoms):
-            for j, k in np.ndindex((self._num_atom, self._num_atom)):
-                transform[first, j, k] = np.dot(self._coeff3[i,j, k], self._ifc3_trans[self._ifc3_map[i, j, k]])
-        transform2 = transform.reshape(-1, len_element)
+        natom = self._num_atom
         fc3_read = self._fc3_read[first_atoms].flatten()
-        try:
+        print "Solving the least square problem..."
+        if self._is_disperse:
             import scipy
-            non_zero = np.where(np.abs(transform2) > self._precision / 1e3)
-            transform_sparse = scipy.sparse.coo_matrix((transform2[non_zero], non_zero), shape=transform2.shape)
+            from scipy.sparse import dok_matrix
+            transform_sparse = dok_matrix((len(first_atoms)*self._num_atom*self._num_atom*27, len_element),dtype='double')
+            for first in range(len(first_atoms)):
+                for j, k in np.ndindex((self._num_atom, self._num_atom)):
+                    first_index_tmp = first * natom * natom * 27 + j * natom * 27 + k * 27
+                    transform_tmp = mat_dot_product(self._coeff3[first,j, k],
+                                                    self._ifc3_trans[self._ifc3_map[first, j, k]],
+                                                    is_sparse=True)
+                    non_zero = np.where(np.abs(transform_tmp) > self._precision / 1e2)
+                    for (m, n) in zip(*non_zero):
+                        transform_sparse[first_index_tmp + m, n] = transform_tmp[m, n]
             lsqr_results = scipy.sparse.linalg.lsqr(transform_sparse, fc3_read)
             self._fc3_irred = lsqr_results[0]
-            fc_tuned = mat_dot_product(transform2, self._fc3_irred, is_sparse=True)
+            fc_tuned = mat_dot_product(transform_sparse, self._fc3_irred, is_sparse=True)
             error = lsqr_results[3]
-        except ImportError:
-            transform_pinv = np.linalg.pinv(transform2)
-            self._fc3_irred = np.dot(transform_pinv, fc3_read)
-            fc_tuned = np.dot(transform2, self._fc3_irred)
-            error = np.sqrt(np.sum((fc_tuned - fc3_read)**2))
+        else:
+            transform = np.zeros((len(first_atoms), self._num_atom,self._num_atom, 27, len_element), dtype='double')
+            for first in range(len(first_atoms)):
+                for j, k in np.ndindex((self._num_atom, self._num_atom)):
+                    transform[first, j, k] = mat_dot_product(self._coeff3[first,j, k],
+                                                             self._ifc3_trans[self._ifc3_map[first, j, k]],
+                                                             is_sparse=True)
+            transform2 = transform.reshape(-1, len_element)
+            try:
+                import scipy
+                non_zero = np.where(np.abs(transform2) > self._precision / 1e2)
+                transform_sparse = scipy.sparse.coo_matrix((transform2[non_zero], non_zero), shape=transform2.shape)
+                lsqr_results = scipy.sparse.linalg.lsqr(transform_sparse, fc3_read)
+                self._fc3_irred = lsqr_results[0]
+                fc_tuned = mat_dot_product(transform2, self._fc3_irred, is_sparse=True)
+                error = lsqr_results[3]
+            except ImportError:
+                transform_pinv = np.linalg.pinv(transform2)
+                self._fc3_irred = np.dot(transform_pinv, fc3_read)
+                fc_tuned = np.dot(transform2, self._fc3_irred)
+                error = np.sqrt(np.sum((fc_tuned - fc3_read)**2))
         print "FC3 tunning process using the least-square method has completed"
         print "    with least square error: %f (eV/A^3)" %error
 
@@ -756,6 +778,7 @@ class ForceConstants():
         ind1 = self._ind1
         ind2 = self._ind2
         ind3 = self._ind3
+        first_atoms = np.unique(self._supercell.get_supercell_to_unitcell_map()).astype('intc')
         if lang=="py":
             self._coeff3, self._ifc3_map =\
                 get_fc3_coefficients(self._triplets,
@@ -773,13 +796,15 @@ class ForceConstants():
                                      ind3['rotations'],
                                      ind3['mappings'],
                                      ind3['mapping_operations'],
+                                     first_atoms,
                                      self._symprec)
         else:
             import _mdfc
-            self._coeff3 = np.zeros((self._num_atom, self._num_atom, self._num_atom, 27, 27), dtype="double")
-            self._ifc3_map = np.zeros((self._num_atom, self._num_atom, self._num_atom), dtype="intc")
+            self._coeff3 = np.zeros((len(first_atoms), self._num_atom, self._num_atom, 27, 27), dtype="double")
+            self._ifc3_map = np.zeros((len(first_atoms), self._num_atom, self._num_atom), dtype="intc")
             _mdfc.get_fc3_coefficients(self._coeff3,
                                          self._ifc3_map,
+                                         first_atoms,
                                          np.array(self._triplets).astype("intc"),
                                          self._triplet_mappings.copy().astype("intc"),
                                          self._triplet_transforms.copy().astype("double"),
@@ -808,11 +833,11 @@ class ForceConstants():
         # distribute all the fc3s
         print "Distributing fc3..."
         fc3 = np.zeros((self._num_atom, self._num_atom, self._num_atom, 3,3,3), dtype="double")
-        for atom1 in np.unique(s2u_map):
+        for i, atom1 in enumerate(np.unique(s2u_map)):
             for atom2 in np.arange(self._num_atom):
                 for atom3 in np.arange(self._num_atom):
-                    num_triplet = ifcmap[atom1, atom2, atom3]
-                    trans_temp = mat_dot_product(coeff[atom1, atom2, atom3], trans[num_triplet], is_sparse=True)
+                    num_triplet = ifcmap[i, atom2, atom3]
+                    trans_temp = mat_dot_product(coeff[i, atom2, atom3], trans[num_triplet], is_sparse=True)
                     fc3[atom1, atom2, atom3] = np.dot(trans_temp, self._fc3_irred).reshape(3,3,3)
         for atom1 in range(self._num_atom):
             if atom1 in s2u_map:
@@ -881,6 +906,8 @@ class ForceConstants():
         ind1 = self._ind1
         ind2 = self._ind2
         ind3 = self._ind3
+        if self._is_disperse:
+            lang = "py"
         if lang == "py":
             self._ifc3_ele, self._ifc3_trans = \
                 get_fc3_spg_invariance(self._triplets_reduced,
@@ -895,7 +922,8 @@ class ForceConstants():
                                        ind3['noperations'],
                                        ind3['mappings'],
                                        self._lattice,
-                                       self._symprec)
+                                       self._symprec,
+                                       is_disperse=self._is_disperse)
         else:
             import _mdfc
             self._ifc3_ele, self._ifc3_trans = \
@@ -915,8 +943,10 @@ class ForceConstants():
         if DEBUG:
             fc3_read = self._fc3_read
             fc3_reduced_triplets = np.double([fc3_read[index] for index in self._triplets_reduced])
-            fc3_reduced =  fc3_reduced_triplets.flatten()[self._ifc3_ele]
-            fc3_reduced_triplets2 = np.dot(self._ifc3_trans, fc3_reduced)
+            fc3_reduced = fc3_reduced_triplets.flatten()[self._ifc3_ele]
+            fc3_reduced_triplets2 = np.zeros_like(fc3_reduced_triplets)
+            for i in range(len(fc3_reduced_triplets)):
+                fc3_reduced_triplets2[i] = mat_dot_product(self._ifc3_trans[i], fc3_reduced, is_sparse=self._is_disperse)
             diff = fc3_reduced_triplets2 - fc3_reduced_triplets.reshape(-1, 27)
             print np.abs(diff).max()
 
@@ -931,7 +961,12 @@ class ForceConstants():
                                              self._ifc3_map,
                                              self._precision)
         self._ifc3_ele = self._ifc3_ele[irreducible_tmp]
-        self._ifc3_trans = mat_dot_product(self._ifc3_trans, transform_tmp, is_sparse=True)
+        if self._is_disperse:
+            for i in range(len(self._ifc3_trans)):
+                transform2 = mat_dot_product(self._ifc3_trans[i], transform_tmp, is_sparse=True)
+                self._ifc3_trans[i] = mat_dense_to_sparse(transform2)
+        else:
+            self._ifc3_trans = mat_dot_product(self._ifc3_trans, transform_tmp, is_sparse=True)
         if self._fc3_read is not None:
             fc3_irr_new = fc3_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc3_irr_new), fc3_irr_orig, info="translational")
@@ -949,7 +984,12 @@ class ForceConstants():
                                           self._symprec,
                                           precision=self._precision)
         self._ifc3_ele = self._ifc3_ele[irreducible_tmp]
-        self._ifc3_trans = mat_dot_product(self._ifc3_trans, transform_tmp, is_sparse=True)
+        if self._is_disperse:
+            for i in range(len(self._ifc3_trans)):
+                transform2 = mat_dot_product(self._ifc3_trans[i], transform_tmp, is_sparse=True)
+                self._ifc3_trans[i] = mat_dense_to_sparse(transform2)
+        else:
+            self._ifc3_trans = mat_dot_product(self._ifc3_trans, transform_tmp, is_sparse=True)
         if self._fc3_read is not None:
             fc3_irr_new = fc3_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc3_irr_new), fc3_irr_orig, info="rotational")
@@ -961,13 +1001,17 @@ class ForceConstants():
         irreducible_tmp, transform_tmp = \
             get_trim_fc3(self._supercell,
                          self._ifc3_trans,
-                         self._coeff3,
-                         self._ifc3_map,
+                         self._triplets_reduced,
                          symprec=self._symprec,
                          precision=self._precision,
                          triplets_included=self._triplets_included)
         self._ifc3_ele = self._ifc3_ele[irreducible_tmp]
-        self._ifc3_trans = mat_dot_product(self._ifc3_trans, transform_tmp, is_sparse=True)
+        if self. _is_disperse:
+            for i in range(len(self._ifc3_trans)):
+                transform2 = mat_dot_product(self._ifc3_trans[i], transform_tmp, is_sparse=True)
+                self._ifc3_trans[i] = mat_dense_to_sparse(transform2)
+        else:
+            self._ifc3_trans = mat_dot_product(self._ifc3_trans, transform_tmp, is_sparse=True)
         if self._fc3_read is not None:
             fc3_irr_new = fc3_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc3_irr_new), fc3_irr_orig, info="trimming")

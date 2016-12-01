@@ -12,6 +12,7 @@ F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
                                     const double symprec);
 void get_fc3_coefficients(double (*coefficients)[27][27], 
                           int *ifc_mapping,
+                          const VecArbiLenINT *first_atoms,
                           const Triplet *triplets,
                           const int *triplet_mapping,
                           const double (*triplet_transform)[27][27],

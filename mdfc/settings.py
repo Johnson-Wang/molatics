@@ -48,6 +48,7 @@ class Settings:
         self._force_filename = 'heat_flux.out'
         self._is_convert_input = False
         self._divide=1
+        self._is_disperse=False
 
     def set_run_mode(self, run_mode):
         self._run_mode = run_mode
@@ -69,6 +70,12 @@ class Settings:
 
     def set_time_symmetry(self, time_symmetry=True):
         self._is_time_symmetry = time_symmetry
+
+    def get_is_disperse(self):
+        return self._is_disperse
+
+    def set_is_disperse(self, is_disperse):
+        self._is_disperse = is_disperse
 
     def get_time_symmetry(self):
         return self._is_time_symmetry
@@ -292,6 +299,9 @@ class ConfParser:
         if params.has_key('is_fc2'):
             self._settings.set_is_fc2(params['is_fc2'])
 
+        if params.has_key('is_disperse'):
+            self._settings.set_is_disperse(params['is_disperse'])
+
         if params.has_key('read_fc3'):
             self._settings.set_read_fc3(params['read_fc3'])
 
@@ -397,6 +407,10 @@ class ConfParser:
             if opt.dest == 'is_fc3':
                 if self._options.is_fc3:
                     self._confs['is_fc3'] = '.true.'
+
+            if opt.dest == 'is_disperse':
+                if self._options.is_disperse:
+                    self._confs['is_disperse'] = '.true.'
 
             if opt.dest == 'is_fc2':
                 if self._options.is_fc2:
@@ -547,6 +561,10 @@ class ConfParser:
             if conf_key == 'is_fc3':
                 if confs['is_fc3'] == '.true.':
                     self.set_parameter('is_fc3', True)
+
+            if conf_key == 'is_disperse':
+                if confs['is_disperse'] == '.true.':
+                    self.set_parameter('is_disperse', True)
 
             if conf_key == 'is_fc2':
                 if confs['is_fc2'] == '.true.':

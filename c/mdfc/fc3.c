@@ -161,6 +161,7 @@ F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
 
 void get_fc3_coefficients(double (*coefficients)[27][27], 
                           int *ifc_mapping,
+                          const VecArbiLenINT *first_atoms,
                           const Triplet *triplets,
                           const int *triplet_mapping,
                           const double (*triplet_transform)[27][27],
@@ -186,7 +187,7 @@ void get_fc3_coefficients(double (*coefficients)[27][27],
   int *unique_triplets = ivector(ntriplets);
   int *mapping2 = ivector(natoms);
   int *mapping3 = ivector(natoms);
-  int a1, a2, a3, atom1_1, atom2_1, atom3_1, atom2_2, atom3_2, atom3_3;
+  int i, a1, a2, a3, atom1_1, atom2_1, atom3_1, atom2_2, atom3_2, atom3_3;
   int num_unique1, num_unique2, num_uniquet;
   int index1, index2, indext, indexi;
   int rot1[3][3], rot2[3][3], rot3[3][3], rot_temp[3][3], rot[3][3]; 
@@ -197,8 +198,9 @@ void get_fc3_coefficients(double (*coefficients)[27][27],
   num_unique1 = array_unique(unique_atoms1, mappings1->vec, natoms);
   num_uniquet = array_unique(unique_triplets, triplet_mapping, ntriplets);
   
-  for(a1=0; a1<natoms; a1++)
+  for(i=0; i<first_atoms->n; i++)
   {
+    a1 = first_atoms->vec[i];
     atom1_1 = mappings1->vec[a1];
     index1=get_index_from_array(unique_atoms1, num_unique1, atom1_1);
 //     printf("atom1_0:%3d\n", a1);
@@ -234,8 +236,8 @@ void get_fc3_coefficients(double (*coefficients)[27][27],
         indexi = get_index_from_array(unique_triplets, num_uniquet, triplet_mapping[indext]); // index of irreducible triplet
 
         mat_multiply_matrix_d27(PP, PP, triplet_transform[indext]);
-        ifc_mapping[a1 * natoms * natoms + a2 * natoms + a3] = indexi;
-        mat_copy_mat_d27(coefficients[a1 * natoms * natoms + a2 * natoms + a3], PP);
+        ifc_mapping[i * natoms * natoms + a2 * natoms + a3] = indexi;
+        mat_copy_mat_d27(coefficients[i * natoms * natoms + a2 * natoms + a3], PP);
       }
     }
   }

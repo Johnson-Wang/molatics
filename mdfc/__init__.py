@@ -59,6 +59,7 @@ class MolecularDynamicsForceConstant:
                  is_symmetry=True,
                  is_translational_invariance=False,
                  is_rotational_invariance=False,
+                 is_disperse=False,
                  precision=1e-8,
                  log_level=0,
                  is_hdf5=False):
@@ -93,7 +94,12 @@ class MolecularDynamicsForceConstant:
         self.map_operations2 = None
         self._coeff2 = None
         self._converge2 = False
-        self._fc = ForceConstants(self.supercell, self._unitcell, self.symmetry, cutoff=self._cutoff, precision = precision)
+        self._fc = ForceConstants(self.supercell,
+                                  self._unitcell,
+                                  self.symmetry,
+                                  is_disperse=is_disperse,
+                                  cutoff=self._cutoff,
+                                  precision = precision)
         self._step = 0
         self._forces1 = None
         self._forces2 = None
@@ -549,8 +555,8 @@ class Cutoff():
             d13 = \
                 np.linalg.norm(np.dot(get_equivalent_smallest_vectors(
                         a3, a1, self._cell, lattice, self._symprec)[0], lattice))
-            if d12 > self._cut_radius[a1] + self._cut_radius[a2] or\
-                d23 > self._cut_radius[a2] + self._cut_radius[a3] or\
+            if d12 > self._cut_radius[a1] + self._cut_radius[a2] and\
+                d23 > self._cut_radius[a2] + self._cut_radius[a3] and\
                 d13 > self._cut_radius[a1] + self._cut_radius[a3]:
                 include_triplet[i] = False
         return include_triplet

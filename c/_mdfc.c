@@ -396,6 +396,7 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
   PyArrayObject* coeff_py;
   PyArrayObject* ifcmap3_py;
   PyArrayObject* triplets_py;
+  PyArrayObject* first_atoms_py;
   PyArrayObject* triplets_mapping_py;
   PyArrayObject* triplets_transform_py;
   PyArrayObject* positions_py;
@@ -427,13 +428,15 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
   PointSymmetry *ps_atom2, *ps_atom3;
   VecArbiLenINT *mappings_atom1;
   VecArbiLenINT *mapope_atom1;
+  VecArbiLenINT *first_atoms;
   MatArbiLenINT *mappings_atom2;
   MatArbiLenINT *mapope_atom2;
   F3ArbiLenINT *mappings_atom3;
   F3ArbiLenINT *mapope_atom3;
-  if (!PyArg_ParseTuple(args, "OOOOOOOOOOOOOOOOOd",
+  if (!PyArg_ParseTuple(args, "OOOOOOOOOOOOOOOOOOd",
       &coeff_py,
       &ifcmap3_py,
+      &first_atoms_py,
       &triplets_py,
       &triplets_mapping_py,
       &triplets_transform_py,
@@ -475,6 +478,7 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
   ps_atom2 = (PointSymmetry*)malloc(sizeof(PointSymmetry) * nind1);
   ps_atom3 = (PointSymmetry*)malloc(sizeof(PointSymmetry) * nind1 * nind2);
   mappings_atom1 = (VecArbiLenINT*) malloc(sizeof(VecArbiLenINT));
+  first_atoms = (VecArbiLenINT*) malloc(sizeof(VecArbiLenINT));
   mapope_atom1 = (VecArbiLenINT*) malloc(sizeof(VecArbiLenINT));
   mappings_atom2 = alloc_MatArbiLenINT(nind1, natoms);
   mapope_atom2 = alloc_MatArbiLenINT(nind1, natoms);
@@ -498,6 +502,8 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
   mappings_atom1->vec = (int *) mappings_atom1_py->data;
   mapope_atom1->n = natoms;
   mapope_atom1->vec = (int*)mapope_atom1_py->data;
+  first_atoms->n = first_atoms_py->dimensions[0];
+  first_atoms->vec = (int*) first_atoms_py->data;
 
   for (i=0; i<nind1; i++)
   {
@@ -523,6 +529,7 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
       }
   get_fc3_coefficients(coefficients, 
                        ifcmap3,
+                       first_atoms,
                        triplets,
                        triplets_mapping, 
                        triplets_transform,
@@ -545,6 +552,7 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
   free(ps_atom3);
   free(mappings_atom1);
   free(mapope_atom1);
+  free(first_atoms);
   free_MatArbiLenINT(mappings_atom2);
   free_MatArbiLenINT(mapope_atom2);
   free_F3ArbiLenINT(mappings_atom3);
