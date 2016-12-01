@@ -9,6 +9,7 @@ static PyObject * py_phonopy_pinv(PyObject *self, PyObject *args);
 static PyObject * py_phonopy_pinv_mt(PyObject *self, PyObject *args);
 static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args);
 static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args);
+static PyObject * py_get_fc3_coefficients_triplet(PyObject *self, PyObject *args);
 static PyObject * py_rearrange_disp_fc3(PyObject *self, PyObject *args);
 static PyObject * py_rearrange_disp_fc2(PyObject *self, PyObject *args);
 static PyObject * py_test(PyObject *self, PyObject *args);
@@ -19,6 +20,7 @@ static PyMethodDef functions[] = {
   {"test",py_test, METH_VARARGS, "testing"},
   {"gaussian", py_gaussian, METH_VARARGS, "Gaussian elimination"},
   {"get_fc3_coefficients", py_get_fc3_coefficients, METH_VARARGS, "Obtain the transformation matrix from irreducible fc3 (<=27) triplets to the whole"},
+  {"get_fc3_coefficients_triplet", py_get_fc3_coefficients_triplet, METH_VARARGS, "Obtain the transformation matrix from irreducible fc3 (<=27) triplets to a given triplet"},
   {"get_fc3_spg_invariance", py_get_fc3_spg_invariance, METH_VARARGS, "Obtain the transformation matrix from irreducible fc3 (<=27) components to full (27) for each irreducible fc3 unit"},
   {"rearrange_disp_fc3", py_rearrange_disp_fc3, METH_VARARGS, "Rearrange the displacements as the coefficients of fc3"},
   {"rearrange_disp_fc2", py_rearrange_disp_fc2, METH_VARARGS, "Rearrange the displacements as the coefficients of fc2"},
@@ -114,7 +116,7 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
   PyArrayObject* transformations_py;
   PyArrayObject* independents_py;
 
-  double precesion;
+  double precision;
   int i, j, k;
   int trans_dimension[3], ind_dimension[1];
   F3ArbiLenDBL *transformations;
@@ -143,7 +145,7 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
       &nrotations_atom3_py,
       &mappings_atom3_py,
       &lattice_py,
-      &precesion)) {
+      &precision)) {
     return NULL;
   }
   
@@ -215,7 +217,7 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
                       ps_atom3,
                       mappings_atom3,
                       lattice,
-                      precesion);
+                      precision);
   trans_dimension[0] = ntriplets; trans_dimension[1] = 27; trans_dimension[2] = transformations->depth;
   ind_dimension[0] = transformations->depth;
   independents_py = (PyArrayObject*) PyArray_FromDims(1, ind_dimension, PyArray_INT);
@@ -308,14 +310,14 @@ static PyObject * py_gaussian(PyObject *self, PyObject *args)
   PyArrayObject* transform_py;
   PyArrayObject* independents_py;
   MatArbiLenDBL* matrix, *transform;
-  double *matrix1D, *transform1D, precesion;
+  double *matrix1D, *transform1D, precision;
   int *independents;
   int row, column, i, j, num_independent;
   if (!PyArg_ParseTuple(args, "OOOd",
       &transform_py,
       &matrix_py,
       &independents_py,
-      &precesion)) {
+      &precision)) {
     return NULL;
   }
   row = (int)matrix_py->dimensions[0];
@@ -328,7 +330,7 @@ static PyObject * py_gaussian(PyObject *self, PyObject *args)
   for (i = 0; i < row; i++)
     for (j = 0; j < column; j++)
       matrix->mat[i][j] = matrix1D[i * column + j];
-  num_independent = gaussian(transform->mat, independents, matrix->mat, row, column, precesion);
+  num_independent = gaussian(transform->mat, independents, matrix->mat, row, column, precision);
   for (i = 0; i < column; i++)
     for (j = 0; j < num_independent; j++)
       transform1D[i * column + j] = transform->mat[i][j];
@@ -408,7 +410,7 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
   PyArrayObject* mapope_atom3_py;
   PyArrayObject* mappings_atom3_py;
   PyArrayObject* lattice_py;
-  double precesion;
+  double precision;
 
   int i, j, k;
   int ntriplets, natoms, nind1, nind2, maxrot2, maxrot3;
@@ -447,7 +449,7 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
       &rotations_atom3_py,
       &mappings_atom3_py,
       &mapope_atom3_py,
-      &precesion)) {
+      &precision)) {
     return NULL;
   }
   coefficients = (double (*)[27][27])coeff_py->data;
@@ -535,7 +537,7 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
                        ps_atom3, 
                        mappings_atom3, 
                        mapope_atom3, 
-                       precesion);
+                       precision);
   free(positions);
   free(triplets);
   free(symmetries_atom1);
@@ -548,4 +550,168 @@ static PyObject * py_get_fc3_coefficients(PyObject *self, PyObject *args)
   free_F3ArbiLenINT(mappings_atom3);
   free_F3ArbiLenINT(mapope_atom3);
   Py_RETURN_NONE;
+}
+
+static PyObject * py_get_fc3_coefficients_triplet(PyObject *self, PyObject *args)
+{
+  Py_Initialize();
+  import_array();
+  PyArrayObject* coeff_py;
+  PyArrayObject* triplet_py;
+  PyArrayObject* triplets_py;
+  PyArrayObject* triplets_mapping_py;
+  PyArrayObject* triplets_transform_py;
+  PyArrayObject* positions_py;
+  PyArrayObject* rotations_atom1_py;
+  PyArrayObject* translations_atom1_py;
+  PyArrayObject* mappings_atom1_py;
+  PyArrayObject* mapope_atom1_py;
+  PyArrayObject* rotations_atom2_py;
+  PyArrayObject* mappings_atom2_py;
+  PyArrayObject* mapope_atom2_py;
+  PyArrayObject* rotations_atom3_py;
+  PyArrayObject* mapope_atom3_py;
+  PyArrayObject* mappings_atom3_py;
+  PyArrayObject* lattice_py;
+  double precision;
+
+  int i, j, k;
+  int ntriplets, natoms, nind1, nind2, maxrot2, maxrot3;
+  int *mappings_atom2_1d, *mappings_atom3_1d, *mapope_atom2_1d, *mapope_atom3_1d;
+  int (*rotations_atom2)[3][3], (*rotations_atom3)[3][3];
+  double (*lattice)[3];
+  double (*coefficients)[27][27];
+  double (*triplets_transform)[27][27];
+  int *triplet;
+  int *triplets_mapping;
+  int ifc_map;
+  VecDBL *positions;
+  Triplet *triplets;
+  Symmetry *symmetries_atom1;
+  PointSymmetry *ps_atom2, *ps_atom3;
+  VecArbiLenINT *mappings_atom1;
+  VecArbiLenINT *mapope_atom1;
+  MatArbiLenINT *mappings_atom2;
+  MatArbiLenINT *mapope_atom2;
+  F3ArbiLenINT *mappings_atom3;
+  F3ArbiLenINT *mapope_atom3;
+  if (!PyArg_ParseTuple(args, "OOOOOOOOOOOOOOOOOd",
+      &coeff_py,
+      &triplet_py,
+      &triplets_py,
+      &triplets_mapping_py,
+      &triplets_transform_py,
+      &lattice_py,
+      &positions_py,
+      &rotations_atom1_py,
+      &translations_atom1_py,
+      &mappings_atom1_py,
+      &mapope_atom1_py,
+      &rotations_atom2_py,
+      &mappings_atom2_py,
+      &mapope_atom2_py,
+      &rotations_atom3_py,
+      &mappings_atom3_py,
+      &mapope_atom3_py,
+      &precision)) {
+    return NULL;
+  }
+  coefficients = (double (*)[27])coeff_py->data;
+  triplet = (int*)triplet_py->data;
+  ntriplets = (int)triplets_py->dimensions[0];
+  triplets_mapping = (int*)triplets_mapping_py->data;
+  triplets_transform = (double (*)[27][27])triplets_transform_py->data;
+  natoms = (int)positions_py->dimensions[0];
+  nind1 = (int)mappings_atom3_py->dimensions[0];
+  nind2 = (int)mappings_atom3_py->dimensions[1];
+  mappings_atom2_1d = (int*) mappings_atom2_py->data;
+  mapope_atom2_1d = (int*) mapope_atom2_py->data;
+  mappings_atom3_1d = (int*) mappings_atom3_py->data;
+  mapope_atom3_1d = (int*) mapope_atom3_py->data;
+  rotations_atom2 = (int (*)[3][3]) rotations_atom2_py->data;
+  maxrot2 = (int)rotations_atom2_py->dimensions[1];
+  rotations_atom3 = (int (*)[3][3]) rotations_atom3_py->data;
+  maxrot3 = (int)rotations_atom3_py->dimensions[2];
+  lattice = (double (*)[3])lattice_py->data;
+  positions = (VecDBL*)malloc(sizeof(VecDBL));
+  triplets = (Triplet*)malloc(sizeof(Triplet));
+  symmetries_atom1 = (Symmetry*)malloc(sizeof(Symmetry));
+  ps_atom2 = (PointSymmetry*)malloc(sizeof(PointSymmetry) * nind1);
+  ps_atom3 = (PointSymmetry*)malloc(sizeof(PointSymmetry) * nind1 * nind2);
+  mappings_atom1 = (VecArbiLenINT*) malloc(sizeof(VecArbiLenINT));
+  mapope_atom1 = (VecArbiLenINT*) malloc(sizeof(VecArbiLenINT));
+  mappings_atom2 = alloc_MatArbiLenINT(nind1, natoms);
+  mapope_atom2 = alloc_MatArbiLenINT(nind1, natoms);
+  mappings_atom3 = alloc_F3ArbiLenINT(nind1, nind2, natoms);
+  mapope_atom3 = alloc_F3ArbiLenINT(nind1, nind2, natoms);
+  mappings_atom1->vec = (int*) mappings_atom1_py->data;
+
+  triplets->size = (int)triplets_py->dimensions[0];
+  triplets->tri = (int(*)[3])triplets_py->data;
+  positions->size = (int)positions_py->dimensions[0];
+  positions->vec = (double (*)[3]) positions_py->data;
+  symmetries_atom1->size = (int)rotations_atom1_py->dimensions[0];
+  symmetries_atom1->rot = (int (*)[3][3]) rotations_atom1_py->data;
+  symmetries_atom1->trans = (double (*)[3]) translations_atom1_py->data;
+  for (i=0; i<nind1; i++)
+  {
+    (ps_atom2+i)->rot = rotations_atom2 + i * maxrot2;
+  }
+
+  mappings_atom1->n = natoms;
+  mappings_atom1->vec = (int *) mappings_atom1_py->data;
+  mapope_atom1->n = natoms;
+  mapope_atom1->vec = (int*)mapope_atom1_py->data;
+
+  for (i=0; i<nind1; i++)
+  {
+    for (j=0; j<nind2; j++)
+    {
+      (ps_atom3+i*nind2+j)->rot = rotations_atom3 + i * nind2 * maxrot3 + j * maxrot3;
+    }
+  }
+
+  for (i=0; i<nind1; i++)
+    for (j=0; j<natoms; j++)
+    {
+      mappings_atom2->mat[i][j] = mappings_atom2_1d[i*natoms+j];
+      mapope_atom2->mat[i][j] = mapope_atom2_1d[i*natoms+j];
+    }
+
+  for (i=0; i<nind1; i++)
+    for (j=0; j<nind2; j++)
+      for (k=0; k<natoms; k++)
+      {
+        mappings_atom3->f3[i][j][k] = mappings_atom3_1d[i*nind2*natoms+j*natoms+k];
+        mapope_atom3->f3[i][j][k] = mapope_atom3_1d[i*nind2*natoms+j*natoms+k];
+      }
+  ifc_map = get_fc3_coefficients_triplet(coefficients,
+                                       triplet,
+                                       triplets,
+                                       triplets_mapping,
+                                       triplets_transform,
+                                       lattice,
+                                       positions,
+                                       symmetries_atom1,
+                                       mappings_atom1,
+                                       mapope_atom1,
+                                       ps_atom2,
+                                       mappings_atom2,
+                                       mapope_atom2,
+                                       ps_atom3,
+                                       mappings_atom3,
+                                       mapope_atom3,
+                                       precision);
+  free(positions);
+  free(triplets);
+  free(symmetries_atom1);
+  free(ps_atom2);
+  free(ps_atom3);
+  free(mappings_atom1);
+  free(mapope_atom1);
+  free_MatArbiLenINT(mappings_atom2);
+  free_MatArbiLenINT(mapope_atom2);
+  free_F3ArbiLenINT(mappings_atom3);
+  free_F3ArbiLenINT(mapope_atom3);
+  return PyInt_FromLong((long) ifc_map);
 }

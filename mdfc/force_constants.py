@@ -5,7 +5,7 @@ from fc2 import get_atom_mapping, get_pairs_with_permute, get_fc2_coefficients, 
 from fc3 import get_bond_symmetry, get_irreducible_triplets_with_permute, get_fc3_coefficients, get_fc3_spg_invariance,\
     get_fc3_translational_invariance, get_fc3_rotational_invariance, get_trim_fc3
 from file_IO import read_fc2_from_hdf5, read_fc3_from_hdf5, write_fc2_hdf5, write_fc3_hdf5
-from fcmath import dot
+from fcmath import mat_dot_product
 from realmd.information import timeit
 import matplotlib.pyplot as plt
 DEBUG = False
@@ -469,7 +469,7 @@ class ForceConstants():
                                              self._ifc2_map,
                                              precision=self._precision)
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
-        self._ifc2_trans = dot(self._ifc2_trans, transform_tmp, is_sparse=True)
+        self._ifc2_trans = mat_dot_product(self._ifc2_trans, transform_tmp, is_sparse=True)
         #checking the results of gaussian elimination
         if self._fc2_read is not None:
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
@@ -489,7 +489,7 @@ class ForceConstants():
                                           symprec=self._symprec,
                                           precision=self._precision)
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
-        self._ifc2_trans = dot(self._ifc2_trans, transform_tmp, is_sparse=True)
+        self._ifc2_trans = mat_dot_product(self._ifc2_trans, transform_tmp, is_sparse=True)
         if self._fc2_read is not None:
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='rotational')
@@ -508,7 +508,7 @@ class ForceConstants():
                          precision=self._precision,
                          pairs_included=self._pairs_included)
         self._ifc2_ele = self._ifc2_ele[irreducible_tmp]
-        self._ifc2_trans = dot(self._ifc2_trans, transform_tmp, is_sparse=True)
+        self._ifc2_trans = mat_dot_product(self._ifc2_trans, transform_tmp, is_sparse=True)
         if self._fc2_read is not None:
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='trimming')
@@ -557,16 +557,19 @@ class ForceConstants():
         sys.stdout.flush()
 
     def tune_fc2(self, is_minimize_relative_error=False, log_level=1):
+        self._fc2 = np.zeros_like(self._fc2_read)
         len_element = len(self._ifc2_ele)
-        transform = np.zeros((self._num_atom, self._num_atom, 9, len_element), dtype='double')
-        for i, j in np.ndindex((self._num_atom, self._num_atom)):
-            transform[i,j] = np.dot(self._coeff2[i,j], self._ifc2_trans[self._ifc2_map[i, j]])
+        first_atoms = np.unique(self._supercell.get_supercell_to_unitcell_map())
+        transform = np.zeros((len(first_atoms), self._num_atom, 9, len_element), dtype='double')
+        for first, i in enumerate(first_atoms):
+            for j in range(self._num_atom):
+                transform[first,j] = np.dot(self._coeff2[i,j], self._ifc2_trans[self._ifc2_map[i, j]])
         transform2 = transform.reshape(-1, len_element)
-        fc2_read_flatten = self._fc2_read.flatten()
+        fc2_read_flatten = self._fc2_read[first_atoms].flatten()
         if is_minimize_relative_error:
-            fc_scale = np.zeros_like(self._fc2_read)
+            fc_scale = np.zeros_like(self._fc2_read[first_atoms])
             transform2 = np.zeros_like(transform)
-            for i, j in np.ndindex((self._num_atom, self._num_atom)):
+            for i, j in np.ndindex((len(first_atoms), self._num_atom)):
                 fc_factor = np.linalg.norm(self._fc2_read[i,j])
                 transform2[i,j] = transform[i,j] / fc_factor
                 fc_scale[i,j] = self._fc2_read[i,j] / fc_factor
@@ -577,24 +580,24 @@ class ForceConstants():
             non_zero = np.where(np.abs(transform2) > 1e-8)
             transform_sparse = scipy.sparse.coo_matrix((transform2[non_zero], non_zero), shape=transform2.shape)
             lsqr_results = scipy.sparse.linalg.lsqr(transform_sparse, fc2_read_flatten)
-            fc_irred = lsqr_results[0]
+            self._fc2_irred = lsqr_results[0]
             error = lsqr_results[3]
-            fc_tuned = dot(transform, fc_irred, is_sparse=True)
+            fc_tuned = mat_dot_product(transform, self._fc2_irred, is_sparse=True)
         except ImportError:
             transform_pinv = np.linalg.pinv(transform2)
-            fc_irred = np.dot(transform_pinv, fc2_read_flatten)
-            fc_tuned = np.dot(transform, fc_irred)
+            self._fc2_irred = np.dot(transform_pinv, fc2_read_flatten)
+            fc_tuned = np.dot(transform, self._fc2_irred)
             error = np.sqrt(np.sum((fc2_read_flatten - fc_tuned.flatten())**2))
-        self._fc2 = fc_tuned.reshape(self._num_atom, self._num_atom, 3, 3)
+        self.distribute_fc2()
         print "FC2 tunning process using the least-square method has completed"
         print "    with least square error: %f (eV/A^2)" %error
         if log_level == 2:
             print "The comparison between original and the tuned force constants is plot and saved to f2-tune_compare.pdf"
             plt.figure()
-            plt.scatter(self._fc2_read.flatten(), fc_tuned, color='red', s=3)
-            plt.plot(np.array([self._fc2_read.min(), self._fc2_read.max()]),
-                     np.array([self._fc2_read.min(), self._fc2_read.max()]), color='blue')
-            threshold = 10 ** np.rint(np.log10(np.abs(self._fc2_read).max() / 1e3))
+            plt.scatter(fc2_read_flatten, fc_tuned, color='red', s=3)
+            plt.plot(np.array([fc2_read_flatten.min(), fc2_read_flatten.max()]),
+                     np.array([fc2_read_flatten.min(), fc2_read_flatten.max()]), color='blue')
+            threshold = 10 ** np.rint(np.log10(np.abs(fc2_read_flatten).max() / 1e3))
             plt.yscale('symlog', linthreshy=threshold)
             plt.xscale('symlog', linthreshx=threshold)
             plt.xlabel("Original fc2 (eV/A^2)")
@@ -618,7 +621,7 @@ class ForceConstants():
             transform_sparse = scipy.sparse.coo_matrix((transform2[non_zero], non_zero), shape=transform2.shape)
             lsqr_results = scipy.sparse.linalg.lsqr(transform_sparse, fc3_read)
             self._fc3_irred = lsqr_results[0]
-            fc_tuned = np.dot(transform2, self._fc3_irred)
+            fc_tuned = mat_dot_product(transform2, self._fc3_irred, is_sparse=True)
             error = lsqr_results[3]
         except ImportError:
             transform_pinv = np.linalg.pinv(transform2)
@@ -665,36 +668,6 @@ class ForceConstants():
             print "Interaction distance cutoff further reduces independent fc3 components to %d" %len(self._ifc3_ele)
         self._num_irred_fc3 = len(self._ifc3_ele)
         sys.stdout.flush()
-
-    def distribute_fc3(self):
-        coeff = self._coeff3
-        ifcmap = self._ifc3_map
-        trans = self._ifc3_trans
-        assert self._fc3_irred is not None
-        s2u_map = self._supercell.get_supercell_to_unitcell_map()
-        scaled_positions = self._supercell.get_scaled_positions()
-        # distribute all the fc3s
-        print "Distributing fc3..."
-        fc3 = np.zeros((self._num_atom, self._num_atom, self._num_atom, 3,3,3), dtype="double")
-        for atom1 in np.unique(s2u_map):
-            for atom2 in np.arange(self._num_atom):
-                for atom3 in np.arange(self._num_atom):
-                    num_triplet = ifcmap[atom1, atom2, atom3]
-                    fc3_irred_tmp = np.dot(trans[num_triplet], self._fc3_irred)
-                    fc3[atom1, atom2, atom3] = np.dot(coeff[atom1, atom2, atom3], fc3_irred_tmp).reshape(3,3,3)
-        for atom1 in range(self._num_atom):
-            if atom1 in s2u_map:
-                continue
-            ip = s2u_map[atom1]
-            l = scaled_positions[atom1] - scaled_positions[ip]
-            for atom2 in range(self._num_atom):
-                disp2 = scaled_positions[atom2] - l - scaled_positions
-                jp = np.where(np.all(np.abs(disp2 - np.rint(disp2)) < self._symprec, axis=-1))[0][0]
-                for atom3 in range(self._num_atom):
-                    disp3 = scaled_positions[atom3] - l - scaled_positions
-                    kp = np.where(np.all(np.abs(disp3 - np.rint(disp3)) < self._symprec, axis=-1))[0][0]
-                    fc3[atom1, atom2, atom3] = fc3[ip, jp, kp]
-        self._fc3 = fc3
 
     @timeit
     def set_third_independents(self):
@@ -778,8 +751,6 @@ class ForceConstants():
                                                   self._symprec)
         self._triplets_reduced = [self._triplets[t] for t in np.unique(self._triplet_mappings)]
 
-        # self._triplets_reduced = [self._triplets[i] for i in np.unique(self._triplet_mappings)]
-
     @timeit
     def get_fc3_coefficients(self, lang="C"):
         ind1 = self._ind1
@@ -825,6 +796,85 @@ class ForceConstants():
                                          ind3['mappings'].astype("intc"),
                                          ind3['mapping_operations'].astype("intc"),
                                          self._symprec)
+
+    @timeit
+    def distribute_fc3(self):
+        coeff = self._coeff3
+        ifcmap = self._ifc3_map
+        trans = self._ifc3_trans
+        assert self._fc3_irred is not None
+        s2u_map = self._supercell.get_supercell_to_unitcell_map()
+        scaled_positions = self._supercell.get_scaled_positions()
+        # distribute all the fc3s
+        print "Distributing fc3..."
+        fc3 = np.zeros((self._num_atom, self._num_atom, self._num_atom, 3,3,3), dtype="double")
+        for atom1 in np.unique(s2u_map):
+            for atom2 in np.arange(self._num_atom):
+                for atom3 in np.arange(self._num_atom):
+                    num_triplet = ifcmap[atom1, atom2, atom3]
+                    trans_temp = mat_dot_product(coeff[atom1, atom2, atom3], trans[num_triplet], is_sparse=True)
+                    fc3[atom1, atom2, atom3] = np.dot(trans_temp, self._fc3_irred).reshape(3,3,3)
+        for atom1 in range(self._num_atom):
+            if atom1 in s2u_map:
+                continue
+            ip = s2u_map[atom1]
+            l = scaled_positions[atom1] - scaled_positions[ip]
+            for atom2 in range(self._num_atom):
+                disp2 = scaled_positions[atom2] - l - scaled_positions
+                jp = np.where(np.all(np.abs(disp2 - np.rint(disp2)) < self._symprec, axis=-1))[0][0]
+                for atom3 in range(self._num_atom):
+                    disp3 = scaled_positions[atom3] - l - scaled_positions
+                    kp = np.where(np.all(np.abs(disp3 - np.rint(disp3)) < self._symprec, axis=-1))[0][0]
+                    fc3[atom1, atom2, atom3] = fc3[ip, jp, kp]
+        self._fc3 = fc3
+
+    @timeit
+    def distribute_fc2(self):
+        coeff = self._coeff2
+        ifcmap = self._ifc2_map
+        trans = self._ifc2_trans
+        assert self._fc2_irred is not None
+        s2u_map = self._supercell.get_supercell_to_unitcell_map()
+        scaled_positions = self._supercell.get_scaled_positions()
+        # distribute all the fc2s
+        print "Distributing fc2..."
+        fc2 = np.zeros((self._num_atom, self._num_atom, 3, 3), dtype="double")
+        for atom1 in np.unique(s2u_map):
+            for atom2 in np.arange(self._num_atom):
+                num_triplet = ifcmap[atom1, atom2]
+                trans_temp = mat_dot_product(coeff[atom1, atom2], trans[num_triplet], is_sparse=True)
+                fc2[atom1, atom2] = np.dot(trans_temp, self._fc2_irred).reshape(3, 3)
+        for atom1 in range(self._num_atom):
+            if atom1 in s2u_map:
+                continue
+            ip = s2u_map[atom1]
+            l = scaled_positions[atom1] - scaled_positions[ip]
+            for atom2 in range(self._num_atom):
+                disp2 = scaled_positions[atom2] - l - scaled_positions
+                jp = np.where(np.all(np.abs(disp2 - np.rint(disp2)) < self._symprec, axis=-1))[0][0]
+                fc2[atom1, atom2] = fc2[ip, jp]
+        self._fc2 = fc2
+
+    def get_fc3_eye_mappings(self):
+        "Get the eye mappings of fc3 (translational invariance)"
+        s2u_map = self._supercell.get_supercell_to_unitcell_map()
+        scaled_positions = self._supercell.get_scaled_positions()
+        fc3_eye_mappings = np.zeros((len(np.unique(s2u_map)), self._num_atom, self._num_atom, 3), dtype='intc')
+        for atom1 in range(self._num_atom):
+            if atom1 in s2u_map:
+                for atom2, atom3 in np.ndindex((self._num_atom, self._num_atom)):
+                    fc3_eye_mappings[atom1, atom2, atom3] = np.array([atom1, atom2, atom3])
+            else:
+                ip = s2u_map[atom1]
+                l = scaled_positions[atom1] - scaled_positions[ip]
+                for atom2 in range(self._num_atom):
+                    disp2 = scaled_positions[atom2] - l - scaled_positions
+                    jp = np.where(np.all(np.abs(disp2 - np.rint(disp2)) < self._symprec, axis=-1))[0][0]
+                    for atom3 in range(self._num_atom):
+                        disp3 = scaled_positions[atom3] - l - scaled_positions
+                        kp = np.where(np.all(np.abs(disp3 - np.rint(disp3)) < self._symprec, axis=-1))[0][0]
+                        fc3_eye_mappings[atom1, atom2, atom3] = np.array([ip, jp, kp])
+        self._fc3_eye_mappings = fc3_eye_mappings
 
     @timeit
     def get_irreducible_fc3_components_with_spg(self, lang="C"):
@@ -881,7 +931,7 @@ class ForceConstants():
                                              self._ifc3_map,
                                              self._precision)
         self._ifc3_ele = self._ifc3_ele[irreducible_tmp]
-        self._ifc3_trans = np.dot(self._ifc3_trans, transform_tmp)
+        self._ifc3_trans = mat_dot_product(self._ifc3_trans, transform_tmp, is_sparse=True)
         if self._fc3_read is not None:
             fc3_irr_new = fc3_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc3_irr_new), fc3_irr_orig, info="translational")
@@ -899,7 +949,7 @@ class ForceConstants():
                                           self._symprec,
                                           precision=self._precision)
         self._ifc3_ele = self._ifc3_ele[irreducible_tmp]
-        self._ifc3_trans = np.dot(self._ifc3_trans, transform_tmp)
+        self._ifc3_trans = mat_dot_product(self._ifc3_trans, transform_tmp, is_sparse=True)
         if self._fc3_read is not None:
             fc3_irr_new = fc3_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc3_irr_new), fc3_irr_orig, info="rotational")
@@ -917,7 +967,7 @@ class ForceConstants():
                          precision=self._precision,
                          triplets_included=self._triplets_included)
         self._ifc3_ele = self._ifc3_ele[irreducible_tmp]
-        self._ifc3_trans = np.dot(self._ifc3_trans, transform_tmp)
+        self._ifc3_trans = mat_dot_product(self._ifc3_trans, transform_tmp, is_sparse=True)
         if self._fc3_read is not None:
             fc3_irr_new = fc3_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc3_irr_new), fc3_irr_orig, info="trimming")

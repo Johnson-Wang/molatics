@@ -2,7 +2,7 @@ __author__ = 'xinjiang'
 import numpy as np
 from itertools import permutations
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
-from mdfc.fcmath import similarity_transformation, gaussian, dot
+from mdfc.fcmath import similarity_transformation, gaussian, mat_dot_product
 def get_next_atom(center, site_symmetry, positions, symprec=1e-5):
     """next_atom: a dict which should at least contain the key 'atom_number'
     site_symmetry: the site_symmetry at the center atom (atom_number)"""
@@ -313,7 +313,7 @@ def get_fc2_rotational_invariance(supercell,
     if is_Huang:
         precision *= 1e2
         print "The Born-Huang invariance condition is also included in rotational symmetry"
-        trans2 = dot(trans, transform, is_sparse=True)
+        trans2 = mat_dot_product(trans, transform, is_sparse=True)
         num_irred2 = trans2.shape[-1]
         torques =[np.zeros(num_irred2)]
         unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())

@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.sparse import coo_matrix
-def dot(array1, array2, is_sparse=False, precision=1e-8):
+
+def mat_dot_product(array1, array2, is_sparse=False, precision=1e-8):
     if not is_sparse:
         return np.dot(array1, array2)
     else:
@@ -15,7 +16,6 @@ def dot(array1, array2, is_sparse=False, precision=1e-8):
         array2_sparse = coo_matrix((array2[non_zero2], non_zero2), shape=array2.shape)
         product = array1_sparse.dot(array2_sparse)
         return product.toarray().reshape(*shape)
-
 
 def gaussian(a, prec=1e-6, lang="C"):
     if lang == "C":

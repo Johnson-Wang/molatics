@@ -1,8 +1,8 @@
 __author__ = 'xinjiang'
 import numpy as np
-from mdfc.fc2 import get_pairs, get_next_atom, get_atom_sent_by_operation, get_atom_sent_by_site_sym,\
-    get_all_operations_at_star, get_rotations_at_star, get_operations_at_star, similarity_transformation
-from mdfc.fcmath import gaussian_py, similarity_transformation
+from mdfc.fc2 import get_atom_sent_by_operation, get_atom_sent_by_site_sym,\
+    get_all_operations_at_star, get_rotations_at_star
+from mdfc.fcmath import gaussian_py, similarity_transformation, mat_dot_product
 from itertools import permutations
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
 
@@ -103,39 +103,64 @@ def get_fc3_coefficients(triplets_orig,
                          rotations3,
                          mappings3,
                          map_ope3,
-                         symprec):
+                         symprec,
+                         triplet=None): # returning the fc3 coefficients at a specific triplet
     natom = len(positions)
     ind_atoms1 = np.unique(mappings1)
     triplets_reduced = [triplets_orig[i] for i in np.unique(mapping_triplet)]
-    ifc_map = np.zeros((natom, natom, natom), dtype=np.int16)
-    coeff = np.zeros((natom, natom, natom, 27, 27), dtype=np.float)
-
-    for atom1 in np.arange(natom):
+    if triplet is None:
+        ifc_map = np.zeros((natom, natom, natom), dtype=np.int16)
+        coeff = np.zeros((natom, natom, natom, 27, 27), dtype=np.float)
+        for atom1 in np.arange(natom):
+            iratom1 = mappings1[atom1]
+            numope = map_ope1[atom1]
+            index1 = np.where(ind_atoms1 == iratom1)[0][0]
+            ind_atoms2 = np.unique(mappings2[index1])
+            rot1, tran1 = rotations1[numope], translations1[numope]
+            for atom2 in np.arange(natom):
+                iratom2 = get_atom_sent_by_operation(atom2, positions, rot1, tran1, symprec=symprec)
+                rot2 = rotations2[index1, map_ope2[index1, iratom2]]
+                iratom2 = mappings2[index1, iratom2]
+                index2 = np.where(ind_atoms2 == iratom2)[0][0]
+                for atom3 in np.arange(natom):
+                    iratom3 = get_atom_sent_by_operation(atom3, positions, rot1, tran1, symprec=symprec)
+                    iratom3 = get_atom_sent_by_site_sym(iratom3, iratom1, positions, rot2, symprec=symprec)
+                    rot3 = rotations3[index1, index2, map_ope3[index1, index2, iratom3]]
+                    iratom3 =mappings3[index1, index2, iratom3]
+                    rot = np.dot(rot3, np.dot(rot2, rot1))
+                    #rot transforms an arbitrary triplet to the irreducible one
+                    index_triplet = triplets_orig.index((iratom1, iratom2, iratom3))
+                    star3 = triplets_orig[mapping_triplet[index_triplet]]
+                    ifc_map[atom1, atom2, atom3] = triplets_reduced.index(star3)
+                    rot_cart = np.double(similarity_transformation(lattice, rot)).T # from irreducible to general
+                    coeff_temp = np.kron(np.kron(rot_cart, rot_cart), rot_cart)
+                    coeff[atom1, atom2, atom3] = np.dot(coeff_temp, transform_triplet[index_triplet])
+                    # Considering the permutation symmetry previously obtained
+    else:
+        atom1, atom2, atom3 = triplet
         iratom1 = mappings1[atom1]
         numope = map_ope1[atom1]
         index1 = np.where(ind_atoms1 == iratom1)[0][0]
         ind_atoms2 = np.unique(mappings2[index1])
         rot1, tran1 = rotations1[numope], translations1[numope]
-        for atom2 in np.arange(natom):
-            iratom2 = get_atom_sent_by_operation(atom2, positions, rot1, tran1, symprec=symprec)
-            rot2 = rotations2[index1, map_ope2[index1, iratom2]]
-            iratom2 = mappings2[index1, iratom2]
-            index2 = np.where(ind_atoms2 == iratom2)[0][0]
-            for atom3 in np.arange(natom):
-                iratom3 = get_atom_sent_by_operation(atom3, positions, rot1, tran1, symprec=symprec)
-                iratom3 = get_atom_sent_by_site_sym(iratom3, iratom1, positions, rot2, symprec=symprec)
-                rot3 = rotations3[index1, index2, map_ope3[index1, index2, iratom3]]
-                iratom3 =mappings3[index1, index2, iratom3]
-                rot = np.dot(rot3, np.dot(rot2, rot1))
-                #rot transforms an arbitrary triplet to the irreducible one
-                index_triplet = triplets_orig.index((iratom1, iratom2, iratom3))
-                star3 = triplets_orig[mapping_triplet[index_triplet]]
-                ifc_map[atom1, atom2, atom3] = triplets_reduced.index(star3)
-                rot_cart = np.double(similarity_transformation(lattice, rot)).T # from irreducible to general
-                coeff_temp = np.kron(np.kron(rot_cart, rot_cart), rot_cart)
-                coeff[atom1, atom2, atom3] = np.dot(coeff_temp, transform_triplet[index_triplet])
-                # Considering the permutation symmetry previously obtained
-    return  coeff, ifc_map
+        iratom2 = get_atom_sent_by_operation(atom2, positions, rot1, tran1, symprec=symprec)
+        rot2 = rotations2[index1, map_ope2[index1, iratom2]]
+        iratom2 = mappings2[index1, iratom2]
+        index2 = np.where(ind_atoms2 == iratom2)[0][0]
+        iratom3 = get_atom_sent_by_operation(atom3, positions, rot1, tran1, symprec=symprec)
+        iratom3 = get_atom_sent_by_site_sym(iratom3, iratom1, positions, rot2, symprec=symprec)
+        rot3 = rotations3[index1, index2, map_ope3[index1, index2, iratom3]]
+        iratom3 =mappings3[index1, index2, iratom3]
+        rot = np.dot(rot3, np.dot(rot2, rot1))
+        #rot transforms an arbitrary triplet to the irreducible one
+        index_triplet = triplets_orig.index((iratom1, iratom2, iratom3))
+        star3 = triplets_orig[mapping_triplet[index_triplet]]
+        ifc_map = triplets_reduced.index(star3)
+        rot_cart = np.double(similarity_transformation(lattice, rot)).T # from irreducible to general
+        coeff_temp = np.kron(np.kron(rot_cart, rot_cart), rot_cart)
+        coeff = np.dot(coeff_temp, transform_triplet[index_triplet])
+    return coeff, ifc_map
+
 
 def get_fc3_spg_invariance(triplets,
                            positions,
@@ -220,26 +245,16 @@ def get_fc3_spg_invariance(triplets,
                                     CC.append(row)
         DD = np.array(CC, dtype='double')
         CC, transform, independent = gaussian_py(DD)
-        # tt = np.zeros((27, 27), dtype='double')
-        # ii = np.zeros(27, dtype='intc')
-        # import _mdfc
-        # nn = _mdfc.gaussian(tt, DD, ii, symprec)
-        # transform = tt[:, :nn]
-        # independent = ii[:nn]
-
-        # if (np.abs(np.dot(transform, fc3[triplet[0], triplet[1], triplet[2]].flatten()[independent]) -
-        #         fc3[triplet[0], triplet[1], triplet[2]].flatten()) > 1e-3).any():
-        #     print triplet
         triplet_dict['independent'] = [ind + itriplet * 27 for ind in independent] # independent ele
         triplet_dict['transform'] = transform
         triplets_dict.append(triplet_dict)
     num_irred = [len(dic['independent']) for dic in triplets_dict]
     trans = np.zeros((len(triplets_dict), 27, sum(num_irred)), dtype="float")
-    for i, trip  in enumerate(triplets_dict):
+    for i, trip in enumerate(triplets_dict):
         start = sum(num_irred[:i])
         length = num_irred[i]
         trans[i,:, start:start + length] = trip['transform']
-    ind_elements =  np.hstack((dic['independent'] for dic in triplets_dict))
+    ind_elements = np.hstack((dic['independent'] for dic in triplets_dict))
     return ind_elements, trans
 
 def get_fc3_translational_invariance(supercell,
@@ -258,7 +273,7 @@ def get_fc3_translational_invariance(supercell,
             for atom3 in range(natom):
                 irred_triplet = ifc_map[atom1, atom2, atom3]
                 transform = trans[irred_triplet]
-                ti_transform += np.dot(coeff[atom1, atom2, atom3], transform) # transform maps from irreducible elements while coeff maps from irreducible triplets
+                ti_transform += mat_dot_product(coeff[atom1, atom2, atom3], transform, is_sparse=True) # transform maps from irreducible elements while coeff maps from irreducible triplets
             for k in range(27):
                 if not (np.abs(ti_transform[k])< precision).all():
                     argmax = np.argmax(np.abs(ti_transform[k]))
@@ -306,7 +321,7 @@ def get_trim_fc3(supercell,
                         is_trim = True
                 if is_trim:
                     irred_doublet = ifc_map[atom1, atom2, atom3]
-                    zero_fc3 = np.dot(coeff[atom1, atom2, atom3], trans[irred_doublet])
+                    zero_fc3 = mat_dot_product(coeff[atom1, atom2, atom3], trans[irred_doublet], is_sparse=True)
                     for k in range(27):
                         if not (np.abs(zero_fc3[k])< precision).all():
                             argmax = np.argmax(np.abs(zero_fc3[k]))
@@ -341,7 +356,7 @@ def get_fc3_rotational_invariance(fc2, supercell, trans, coeff, ifc_map, symprec
         for atom2 in range(natom):
             torque = np.zeros((27, num_irred), dtype=np.float)
             for atom3 in range(natom):
-                fc_temp = np.dot(coeff[atom1, atom2, atom3], trans[ifc_map[atom1, atom2, atom3]]).reshape(3,3,3, -1)
+                fc_temp = mat_dot_product(coeff[atom1, atom2, atom3], trans[ifc_map[atom1, atom2, atom3]], is_sparse=True).reshape(3, 3, 3, -1)
                 vectors = get_equivalent_smallest_vectors(atom3,
                                                           atom1,
                                                           supercell,

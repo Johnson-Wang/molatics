@@ -248,6 +248,84 @@ void get_fc3_coefficients(double (*coefficients)[27][27],
 }
 
 
+int get_fc3_coefficients_triplet(double coefficients[27][27],
+                                  const int triplet[3],
+                                  const Triplet *triplets,
+                                  const int *triplet_mapping,
+                                  const double (*triplet_transform)[27][27],
+                                  const double lattice[3][3],
+                                  const VecDBL *positions,
+                                  const Symmetry *symmetry1,
+                                  const VecArbiLenINT *mappings1,
+                                  const VecArbiLenINT *mapope1,
+                                  const PointSymmetry *pointsymmetry2,
+                                  const MatArbiLenINT *mappings2,
+                                  const MatArbiLenINT *mapope2,
+                                  const PointSymmetry *pointsymmetry3,
+                                  const F3ArbiLenINT *mappings3,
+                                  const F3ArbiLenINT *mapope3,
+                                  const double symprec)
+{
+  PointSymmetry *ps2, *ps3;
+  int ifc_mapping;
+  int natoms = positions->size;
+  int ntriplets = triplets->size;
+  int *unique_atoms1 = ivector(natoms);
+  int *unique_atoms2 = ivector(natoms);
+  int *unique_atoms3 = ivector(natoms);
+  int *unique_triplets = ivector(ntriplets);
+  int *mapping2 = ivector(natoms);
+  int *mapping3 = ivector(natoms);
+  int a1, a2, a3, atom1_1, atom2_1, atom3_1, atom2_2, atom3_2, atom3_3;
+  int num_unique1, num_unique2, num_uniquet;
+  int index1, index2, indext, indexi;
+  int rot1[3][3], rot2[3][3], rot3[3][3], rot_temp[3][3], rot[3][3];
+  double trans1[3];
+  int triplet_rot[3];
+  double rot_db[3][3], rot_cart[3][3];
+  double PP[27][27];
+  num_unique1 = array_unique(unique_atoms1, mappings1->vec, natoms);
+  num_uniquet = array_unique(unique_triplets, triplet_mapping, ntriplets);
+  a1 = triplet[0]; a2 = triplet[1]; a3 = triplet[2];
+  atom1_1 = mappings1->vec[a1];
+  index1=get_index_from_array(unique_atoms1, num_unique1, atom1_1);
+  mat_copy_matrix_i3(rot1, symmetry1->rot[mapope1->vec[a1]]);
+  mat_copy_vector_d3(trans1, symmetry1->trans[mapope1->vec[a1]]);
+  ps2 = (PointSymmetry*)pointsymmetry2 + index1;
+  mat_copy_array_i(mapping2, mappings2->mat[index1], natoms);
+  num_unique2 = array_unique(unique_atoms2, mapping2, natoms);
+  atom2_1 = get_atom_sent_by_operation(a2, positions->vec, rot1, trans1, natoms, symprec);
+  atom2_2 = mapping2[atom2_1];
+  index2 = get_index_from_array(unique_atoms2, num_unique2, atom2_2);
+  mat_copy_matrix_i3(rot2, ps2->rot[mapope2->mat[index1][atom2_1]]);
+  ps3 = (PointSymmetry*)pointsymmetry3 + index1 * mappings3->column + index2;   // the column of mapping3 is equal to the max unique_atoms2
+
+  atom3_1 = get_atom_sent_by_operation(a3, positions->vec, rot1, trans1, natoms, symprec);
+  atom3_2 = get_atom_sent_by_rotation(atom3_1, atom1_1, positions->vec, rot2, natoms, symprec);
+  mat_copy_array_i(mapping3, mappings3->f3[index1][index2], natoms);
+  atom3_3 = mapping3[atom3_2];
+  mat_copy_matrix_i3(rot3, ps3->rot[mapope3->f3[index1][index2][atom3_2]]);
+  mat_multiply_matrix_i3(rot_temp, rot2, rot1);
+  mat_multiply_matrix_i3(rot, rot3, rot_temp);
+  mat_cast_matrix_3i_to_3d(rot_db, rot);
+  mat_get_similar_matrix_d3(rot_cart, rot_db, lattice, 0); // from a general atom to its star
+  mat_transpose_matrix_d3(rot_cart, rot_cart); // from a star to its orbitals
+  mat_kron_product_matrix3_d3(PP, rot_cart, rot_cart, rot_cart);
+  triplet_rot[0] = atom1_1; triplet_rot[1] = atom2_2; triplet_rot[2] = atom3_3;
+  indext = get_index_from_vectors_i3(triplets->tri, triplets->size, triplet_rot); // index of triplet
+  indexi = get_index_from_array(unique_triplets, num_uniquet, triplet_mapping[indext]); // index of irreducible triplet
+  mat_multiply_matrix_d27(PP, PP, triplet_transform[indext]);
+  ifc_mapping = indexi;
+  mat_copy_mat_d27(coefficients, PP);
+
+  free_ivector(unique_atoms1);
+  free_ivector(unique_atoms2);
+  free_ivector(unique_atoms3);
+  free_ivector(unique_triplets);
+  free_ivector(mapping2);
+  free_ivector(mapping3);
+  return ifc_mapping;
+}
 
 void rearrange_disp_fc3(double *ddcs, 
 			const double *disps, 
