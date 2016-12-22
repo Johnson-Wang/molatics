@@ -10,7 +10,7 @@ from mdfc.file_IO import write_fc3_hdf5, write_fc2_hdf5
 from force_constants import show_rotational_invariance,\
      set_translational_invariance, show_drift_force_constants
 # from mdfc.fc2 import get_irreducible_components2, get_fc2_least_irreducible_components, get_disp_coefficient
-from mdfc.fc3 import show_drift_fc3 #, get_fc3_irreducible_components
+# from mdfc.fc3 import show_drift_fc3 #, get_fc3_irreducible_components
 from mdfc.force_constants import ForceConstants
 from realmd.information import timeit, print_error_message, warning
 from copy import deepcopy
@@ -73,7 +73,6 @@ class MolecularDynamicsForceConstant:
         self._set_supercell()
         self._symmetry = None
         self._set_symmetry()
-        self._primitive = None
         self._fc2 = None
         self.set_cutoffs(cutoff_radius)
         self._cutoff_force=cutoff_force
@@ -95,7 +94,7 @@ class MolecularDynamicsForceConstant:
         self._coeff2 = None
         self._converge2 = False
         self._fc = ForceConstants(self.supercell,
-                                  self._unitcell,
+                                  self.primitive,
                                   self.symmetry,
                                   is_disperse=is_disperse,
                                   cutoff=self._cutoff,
@@ -470,6 +469,9 @@ class MolecularDynamicsForceConstant:
                                         self._supercell_matrix,
                                         self._symprec)
         self.set_supercell(supercell)
+        self._primitive = Primitive(supercell,
+                                    np.linalg.inv(self._supercell_matrix),
+                                    self._symprec)
 
     def _set_symmetry(self):
         self._symmetry = Symmetry(self._supercell,

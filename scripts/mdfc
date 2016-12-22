@@ -11,7 +11,7 @@ from phonopy import *
 from phonopy.interface import vasp
 
 from mdfc import MolecularDynamicsForceConstant as MDFC
-from mdfc.fc3 import show_drift_fc3
+# from mdfc.fc3 import show_drift_fc3
 from mdfc.fc2 import show_drift_force_constants, show_rotational_invariance
 from mdfc.settings import ConfParser
 from realmd.mdkappa import MolecularDynamicsForceEnergy as MDFE
@@ -296,7 +296,8 @@ mdfc = MDFC(unitcell,
           log_level=log_level,
           is_hdf5=settings.get_is_hdf5())
 
-
+if settings.get_is_translational_invariance() or settings.get_is_rotational_invariance():
+    mdfc.fc.set_smallest_vectors()
 
 if settings.get_read_fc2() is not None:
     print "##########%s is read and tunned to satisfy symmetry conditions#############" %settings.get_read_fc2()
@@ -325,10 +326,10 @@ if settings.get_read_fc2() is not None:
     else:
         fc.set_fc2_irreducible_elements()
         fc.set_translational_rotational_invariance()
-    print "\n##########After tunning, checking the invariance conditions for the tuned force constants#############"
+    print "##########After tunning, checking the invariance conditions for the tuned force constants#############"
     show_drift_force_constants(fc.get_fc2())
     show_rotational_invariance(fc.get_fc2(), supercell=mdfc.supercell, log_level=log_level)
-
+    print "The tunning process for fc2 completed\n"
     if settings.get_read_fc3() is None:
         print_end()
         sys.exit(0)
@@ -337,11 +338,15 @@ if settings.get_read_fc3() is not None:
     print "##########%s is read and tunned to satisfy symmetry conditions#############" %settings.get_read_fc3()
     fc = mdfc.fc
     fc.set_fc3_read(settings.get_read_fc3())
-    show_drift_fc3(fc._fc3_read)
+    fc.show_drift_fc3()
+    if settings.get_read_fc2():
+        fc.show_rotational_invariance_fc3()
     fc.set_fc3_irreducible_components(is_trans_inv=settings.get_is_translational_invariance(),
                                       is_rot_inv=settings.get_is_rotational_invariance())
     fc.tune_fc3()
-    show_drift_fc3(fc._fc3)
+    fc.show_drift_fc3(fc3=fc._fc3)
+    if fc._fc2 is not None:
+        fc.show_rotational_invariance_fc3(fc3=fc._fc3, fc2=fc._fc2)
     print_end()
     sys.exit(0)
 

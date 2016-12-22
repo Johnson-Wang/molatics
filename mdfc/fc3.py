@@ -355,9 +355,9 @@ def get_trim_fc3(supercell,
         CC, transform, independent = gaussian_py(np.array(zero_fc3s, dtype='double'), prec=precision)
     return independent, transform
 
-
 def get_fc3_rotational_invariance(fc2, supercell, trans, coeff, ifc_map, symprec=1e-5, precision=1e-6):
-    precision *= 1e3
+    "Returning the constraint equations to be used in Lagrangian Multipliers"
+    precision *= 1e2
     unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
     natom = supercell.get_number_of_atoms()
     num_irred = trans[0].shape[-1]
@@ -365,10 +365,13 @@ def get_fc3_rotational_invariance(fc2, supercell, trans, coeff, ifc_map, symprec
     eijk = np.zeros((3,3,3), dtype="intc")
     eijk[0,1,2] = eijk[1,2,0] = eijk[2,0,1] = 1
     eijk[0,2,1] = eijk[2,1,0] = eijk[1,0,2] = -1 # epsilon matrix, which is an antisymmetric 3 * 3 * 3 tensor
-    torques =[np.zeros(num_irred)]
+    torques =[np.zeros(num_irred + 1)] # considering the constant column
     for i, atom1 in enumerate(unit_atoms):
         for atom2 in range(natom):
             torque = np.zeros((27, num_irred), dtype=np.float)
+            t2_1 = np.einsum("cb, cav -> abv", fc2[atom1, atom2], eijk).flatten()
+            t2_2 = np.einsum("ac, cbv -> abv", fc2[atom1, atom2], eijk).flatten()
+            torque_fc2 = t2_1 + t2_2
             for atom3 in range(natom):
                 fc_temp = mat_dot_product(coeff[i, atom2, atom3], trans[ifc_map[i, atom2, atom3]], is_sparse=True).reshape(3, 3, 3, -1)
                 vectors = get_equivalent_smallest_vectors(atom3,
@@ -380,9 +383,8 @@ def get_fc3_rotational_invariance(fc2, supercell, trans, coeff, ifc_map, symprec
                 r = np.dot(r_frac, lattice)
                 disp = np.einsum("j, ijk -> ik", r, eijk)
                 t3 = np.einsum("abcN, cv -> abvN", fc_temp, disp).reshape(27, num_irred)
-                t2_1 = np.einsum("cb, cav -> abv", fc2[atom1, atom2], eijk).flatten()
-                t2_2 = np.einsum("ac, cbv -> abv", fc2[atom1, atom2], eijk).flatten()
-                torque += (t3.T + t2_1 + t2_2).T
+                torque += t3
+            torque = np.hstack((torque, -torque_fc2[:, np.newaxis])) #negative sign means Bx = d
             for k in range(27):
                 if not (np.abs(torque[k])< precision).all():
                     argmax = np.argmax(np.abs(torque[k]))
@@ -391,31 +393,6 @@ def get_fc3_rotational_invariance(fc2, supercell, trans, coeff, ifc_map, symprec
                     if (is_exist == False).all():
                         torques.append(torque[k] / torque[k, argmax])
     print "Number of constraints of IFC3 from rotational invariance:%d"%(len(torques) - 1)
+    torques = np.array(torques)[1:]
+    return torques[:, :-1], torques[:, -1] # return B and d
 
-    try:
-        import _mdfc
-        transform = np.zeros((num_irred, num_irred), dtype='double')
-        independent = np.zeros(num_irred, dtype='intc')
-        num_independent = _mdfc.gaussian(transform, np.array(torques, dtype='double'), independent, precision)
-        transform = transform[:, :num_independent]
-        independent = independent[:num_independent]
-    except ImportError:
-        CC, transform, independent = gaussian_py(np.array(torques), prec=precision)
-    return independent, transform
-
-def show_drift_fc3(fc3, name="fc3"):
-    num_atom = fc3.shape[0]
-    maxval1 = 0
-    maxval2 = 0
-    maxval3 = 0
-    for i, j, k, l, m in list(np.ndindex((num_atom, num_atom, 3, 3, 3))):
-        val1 = fc3[:, i, j, k, l, m].sum()
-        val2 = fc3[i, :, j, k, l, m].sum()
-        val3 = fc3[i, j, :, k, l, m].sum()
-        if abs(val1) > abs(maxval1):
-            maxval1 = val1
-        if abs(val2) > abs(maxval2):
-            maxval2 = val2
-        if abs(val3) > abs(maxval3):
-            maxval3 = val3
-    print ("max drift of %s:" % name), maxval1, maxval2, maxval3
