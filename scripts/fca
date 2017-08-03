@@ -1,0 +1,505 @@
+#!/usr/bin/env python
+"""
+Force Constant Analyzer
+Created on July 06, 2014
+"""
+__author__="Wang Xinjiang"
+__version__="0.1"
+__email__="xwangan@ust.hk"
+
+import h5py
+import sys
+import numpy as np
+import yaml
+from optparse import OptionParser
+from phonopy.interface.vasp import read_vasp
+from phonopy.structure.cells import get_supercell, get_distance, Primitive
+from phonopy.harmonic.dynamical_matrix import get_smallest_vectors, get_equivalent_smallest_vectors
+import pylab as pl
+import matplotlib.cm as cm
+import itertools
+
+
+# Read FORCE_CONSTANTS
+def parse_FORCE_CONSTANTS(filename):
+    fcfile = open(filename)
+    num = int((fcfile.readline().strip().split())[0])
+    force_constants = np.zeros((num, num, 3, 3), dtype=float)
+    for i in range(num):
+        for j in range(num):
+            fcfile.readline()
+            tensor = []
+            for k in range(3):
+                tensor.append([float(x) for x in fcfile.readline().strip().split()])
+            force_constants[i, j] = np.array(tensor)
+    return force_constants
+
+def parse_FORCE_CONSTANTS_3rd_ShengBTE(primitive, supercell, filename):
+    num_atom_prim = primitive.get_number_of_atoms()
+    num_atom_super = supercell.get_number_of_atoms()
+    fc3 = np.zeros((num_atom_prim, num_atom_super, num_atom_super, 3, 3, 3), dtype='double')
+    f = file(filename, 'r')
+    nfc3 = int(f.readline())
+    pos_super = supercell.get_positions()
+    pos_prim = primitive.get_positions()
+    inv_super_lattice = np.linalg.inv(supercell.get_cell())
+    for nline in range(nfc3):
+        f.readline(); f.readline()
+        l1 = np.fromstring(f.readline(), dtype=float, sep=' ')
+        l2 = np.fromstring(f.readline(), dtype=float, sep=' ')
+        l12 = np.dot([l1, l2], inv_super_lattice) # get relative cell address
+        l12 -= np.rint(l12)
+        l1, l2 = np.dot(l12, supercell.get_cell()) # return to absolute cell address
+        atom0, atom1, atom2 = np.fromstring(f.readline(), dtype=int, sep=' ') - 1
+        atom1 = np.abs(pos_prim[atom1] + l1 - pos_super).sum(axis=1).argmin()
+        atom2 = np.abs(pos_prim[atom2] + l2 - pos_super).sum(axis=1).argmin()
+        for i in range(27):
+            line = f.readline().split()
+            a, b, c = map(lambda x: int(x) - 1, line[:-1])
+            fc3[atom0, atom1, atom2, a, b, c] = float(line[-1])
+    f.close()
+    return fc3
+
+
+parser = OptionParser()
+parser.add_option("--mode", dest="mode", type=int, default=2, 
+                   help="The mode of the force constants, harmonic (2) or anharmonic (3)")
+parser.add_option("-c","--poscar", dest="poscar", type="string", default="POSCAR", 
+                   help="The POSCAR file of the unit-cell")
+parser.add_option("--dim", dest="dim", type="string", default=None, 
+                   help="Supercell dimension")
+parser.add_option("-o", dest="output", type="string", default=None, 
+                   help="output file name of the plot (in pdf format)")
+parser.add_option("--center", dest="center_atom", type=int, default=0,
+                   help="The center atom (in the unit-cell) for the force constants to be printed out")
+parser.add_option("--legend", dest="is_legend", action="store_true",
+                   help="If set, the legend of the atoms are shown")
+parser.add_option("--ddefine", "--distance_define", dest="ddefine", type="string", default="min",
+                   help="Set the distance definition for fc3 (min, max, cir or hydraulic)")
+parser.add_option("--dirt","--dir", dest="dirt", type="string", default=None,
+                   help="The direction tensor (e.g. 'xx', 'yy', 'zz' for fc2 or 'xxx', 'yyy' for fc3). If not specified, a generalized norm is calculated.")
+parser.add_option("--projection", "--proj", dest="projection", type="string", default=None,
+                   help="The projection direction of the distance vector")
+parser.add_option('-r',"--relative", dest="is_relative", action="store_true",
+                   help="Set the relative value as the vertical axis")
+parser.add_option('--log', dest="is_log", action="store_true",
+                   help="print in logarithm scale (vertical)")
+parser.add_option('--ymin', dest="ymin", type="float",default=1e-5,
+                   help="minimum of y value in plot")
+parser.add_option('--ymax', dest="ymax", type="float",default=None,
+                   help="maximum of y value in plot")
+parser.add_option('--xreverse', dest="xreverse", type="string",default=None,
+                   help="export the atom triplet corresponding to the largest fc within the given distance range(e.g. '3.4 3.5')")
+(options, args) = parser.parse_args()
+mode = options.mode 
+
+# specify the filename
+filename1=None
+if len(args) == 0:
+    print "The force constants file is specified automatically!"
+    if mode == 2:
+        filename = "fc2.hdf5"
+    elif mode == 3:
+        filename = "fc3.hdf5"
+    else:
+        print "Force constant modes other than 2 and 3 have not been implemented!"
+        sys.exit(1)
+elif len(args) == 1:
+    filename = args[0]
+else:
+    print "Two force constants are compared"
+    filename = args[0]
+    filename1 = args[1] 
+#dimension of the Supercell
+if options.dim is not None:
+    dim = [int(x) for x in options.dim.split()]
+    if len(dim) == 9:
+        dim = np.array(dim).reshape(3, 3)
+    elif len(dim) == 3:
+        dim = np.diag(dim)
+    else:
+        print "Error! Number of elements of DIM tag has to be 3 or 9."
+        sys.exit(1)
+    if np.linalg.det(dim) < 1:
+        print 'Error! Determinant of supercell matrix has to be positive.'
+        sys.exit(1)
+else:
+    print "Error! The DIM tag has to be specified."
+    sys.exit(1)
+
+#Extract the maximum force constants and the corresponding interacting pair or triple
+if options.xreverse is not None:
+    reverse_range = map(float, options.xreverse.replace(",", " ").split())
+    if len(reverse_range) == 1:
+        reverse_range = [reverse_range[0]-0.01, reverse_range[0] + 0.01]
+    else:
+        reverse_range = [reverse_range[0], reverse_range[1]]
+
+# Direction
+dir_map={"x":0, "y":1, "z": 2}
+dirt = None
+if options.dirt is not None:
+    dirt_string = options.dirt.replace(",", "").replace(" ", "")
+    for key in dirt_string:
+        if key not in dir_map.keys():
+            print "Error: The direction tensor is set incorrectly"
+            sys.exit(1)
+    dirt = [dir_map[s] for s in dirt_string]
+    if len(dirt) > 0:
+        if mode == 2:
+            if len(dirt) == 1:
+                dirt = [dirt[0], dirt[0]]
+            elif len(dirt) > 2:
+                print "Warning! The given direction tensor is ambiguous"
+                print "Only the first two component is extracted"
+                dirt = dirt[:2]
+        if mode == 3:
+            if len(dirt) == 1:
+                dirt = [dirt[0], dirt[0], dirt[0]]
+            elif len(dirt) > 3:
+                print "Warning! The given direction tensor is ambiguous"
+                print "Only the first three component is extracted"
+                dirt = dirt[:3]
+            elif len(dirt) == 2:
+                print "Error! The given direction tensor components are not enough"
+                sys.exit(1)
+if options.projection is not None:
+    projection_string = options.projection.replace(",", "").replace(" ", "")
+    if projection_string[0] not in dir_map.keys():
+        print "Error: The projection is set incorrectly!"
+        sys.exit(1)
+    projection = dir_map[projection_string[0]]
+else:
+    projection = None
+if options.dirt is not None and options.is_log:
+    print "Warning: The dirt and log arguments are not compatible"
+    print "All the values on the graph are set as positive"
+
+#center
+center_atom = options.center_atom
+
+#POSCAR
+cell = read_vasp(options.poscar)
+supercell = get_supercell(cell,dim)
+s2u_map = supercell.get_supercell_to_unitcell_map()
+chemical_symbols = supercell.get_chemical_symbols()
+chemicals,index = np.unique(chemical_symbols, return_index=True)
+chemicals=chemicals[np.argsort(index)]
+chemap = []
+for c_unique in chemicals:
+    che_temp = []
+    for i,c_all in enumerate(chemical_symbols):
+        if c_unique == c_all:
+            che_temp.append(i)
+    chemap.append(che_temp)
+primitive = Primitive(supercell, np.linalg.inv(dim),1e-5)
+num_atom_prim = primitive.get_number_of_atoms()
+if not  0 <= center_atom < num_atom_prim:
+    print "The center atom %d is out of the index range (%d-->%d)"%(center_atom, 0, num_atom_prim-1)
+    sys.exit(1)
+print "Center atom in the unitcell:"
+symbol = primitive.get_chemical_symbols()[center_atom]
+pos = primitive.get_scaled_positions()[center_atom]
+print "Index: %d; Symbol: %s; Position: [%10.6f, %10.6f, %10.6f]"%(center_atom, symbol, pos[0], pos[1], pos[2])
+print "Center atom in the supercell:"
+num_atom_super = supercell.get_number_of_atoms()
+index_super = primitive.get_primitive_to_supercell_map()[center_atom]
+pos_super = supercell.get_scaled_positions()[index_super]
+print "Index: %d; Symbol: %s; Position: [%10.6f, %10.6f, %10.6f]" %(index_super, symbol, pos_super[0], pos_super[1], pos_super[2])
+
+# read force constants
+if filename.find('hdf5') != -1:
+    f = h5py.File(filename,"r")
+    try:
+        if mode == 2:
+            if 'fc2' in f.keys():
+                fc = f['fc2'][:][index_super]
+            elif 'force_constants' in f.keys():
+                fc = f['force_constants'][:][index_super]
+        elif mode == 3:
+            fc = f['fc3'][:][index_super]
+
+    except KeyError:
+        print "Error! Force constants related keys do not exist."
+        print "Maybe the mode is set incorrectly."
+        sys.exit(1)
+else:
+    if mode == 2:
+        fc = parse_FORCE_CONSTANTS(filename)
+        fc = fc[index_super]
+    else:
+        fc = parse_FORCE_CONSTANTS_3rd_ShengBTE(primitive, supercell, filename)
+        fc = fc[center_atom]
+if filename1 is not None:
+    if filename1.find('hdf5') != -1:
+        f = h5py.File(filename1,"r")
+        try:
+            if mode == 2:
+                if 'fc2' in f.keys():
+                    fcp = f['fc2'][:]
+                elif 'force_constants' in f.keys():
+                    fcp = f['force_constants'][:]
+            elif mode == 3:
+                fcp = f['fc3'][:]
+        except KeyError:
+            print "Error! Force constants related keys do not exist."
+            print "Maybe the mode is set incorrectly."
+            sys.exit(1)
+    else:
+        if mode == 2:
+            fcp = parse_FORCE_CONSTANTS(filename1)
+            fcp = fcp[index_super]
+        else:
+            fcp = parse_FORCE_CONSTANTS_3rd_ShengBTE(primitive, supercell, filename)
+            fcp = fcp[center_atom]
+            sys.exit(1)
+    fc -= fcp
+
+
+#Calculating inter-atomic distance
+markers=itertools.cycle(".,ov^<>12348s*p+xD")
+force_in_range = []
+pair_in_range = []
+dist_in_range = []
+if mode == 2:
+    if not options.is_relative:
+        unit="eV/A^2"
+    else:
+        unit="arbi"
+    distance = np.zeros(num_atom_super, dtype=float)
+    fc_relative_trace = np.zeros(num_atom_super, dtype=float)
+    if options.is_relative: 
+        if dirt is None:
+            self_trace = np.linalg.norm(fc[index_super])
+        else:
+            self_trace = fc[index_super, dirt[0], dirt[1]]
+        print "Self-interaction strength for the center atom: %f (eV/A^2)"%self_trace
+        if np.abs(self_trace) < 1e-7:
+            print "Warning: Self-interaction strength too small"
+            print "Changing to absolute value instead"
+            self_trace = 1.0
+    else:
+        self_trace = 1.0 
+    for i in np.arange(num_atom_super):
+
+        if projection is not None:
+            vectors = \
+            get_equivalent_smallest_vectors(i, index_super,
+                                            supercell=supercell,
+                                            primitive_lattice=primitive.get_cell(),
+                                            symprec=1e-5)
+            vectors = np.dot(vectors, primitive.get_cell())
+            project_vector = np.eye(3)[projection]
+            distance[i] = np.abs(np.dot(vectors, project_vector)).min()
+        else:
+            distance[i] = get_distance(supercell, index_super, i)
+
+        if dirt is not None:
+            fc_temp = fc[i, dirt[0], dirt[1]]
+        else:
+            fc_temp = np.linalg.norm(fc[i])
+        if options.is_log:
+            fc_relative_trace[i] = np.abs(fc_temp / self_trace) + 1e-10
+        else:
+            fc_relative_trace[i] = fc_temp / self_trace
+        if options.xreverse is not None:
+            if distance[i] < reverse_range[1] and distance[i] > reverse_range[0]:
+                pair_in_range.append((index_super, i))
+                force_in_range.append(fc_relative_trace[i])
+                dist_in_range.append(distance[i])
+    
+    if options.xreverse is not None:
+        ind = np.argmax(force_in_range)
+        print "Max force component within the given distance range %f to %f" %tuple(reverse_range)
+        print "pair:", pair_in_range[ind]
+        print 'Max force:', force_in_range[ind]
+        sys.exit(0)
+    distance_map={}
+    for i,c in enumerate(chemicals):
+        for j in chemap[i]:
+            distance_map.setdefault(c, []).append([distance[j], fc_relative_trace[j]])
+    print "Distance (A) and bond strength (%s)"%unit
+    for i,c in enumerate(chemicals):
+        dist = np.array(distance_map[c])
+        dargsort = np.argsort(dist[:,0])
+        distance_map[c] = np.vstack((dist[:,0][dargsort], dist[:,1][dargsort])).T
+        print "%10s %10s " %("dist(A)", symbol+'-'+c),
+    print
+    length=0
+    while True:
+        all_empty=True
+        for i, c in enumerate(chemicals):
+            dist = distance_map[c]
+            if len(dist)<=length:
+                print "%10s %10s " %(" ", " "),
+            else:
+                all_empty=False
+                print "%10.7f %10.7f " %tuple(dist[length]),
+        print 
+        length+=1
+        if all_empty:
+            break
+    colors = cm.rainbow(np.linspace(0, 1, len(chemicals)))
+    for i in np.arange(len(chemicals)):
+        marker = markers.next()
+        if options.is_log:
+            pl.scatter(distance[chemap[i]], np.abs(fc_relative_trace[chemap[i]]), label=symbol+"-"+chemicals[i], color=colors[i], marker=marker)
+        else:
+            pl.scatter(distance[chemap[i]], fc_relative_trace[chemap[i]], label=symbol+"-"+chemicals[i], color=colors[i], marker=marker)
+    pl.xlabel("Distance (A)")
+    pl.ylabel("Bond strength (%s)"%unit)
+    if options.is_legend:
+        pl.legend()
+    if options.is_log:
+        pl.yscale("log")
+    if options.output == None:
+        output = filename.split(".")[0]
+        if filename1 is not None:
+            output += "-"+filename1.split(".")[0]
+        output += '-%s.pdf'%symbol
+    else:
+        output = options.output
+    if options.ymin is not None:
+        pl.ylim(ymin=options.ymin)
+    if options.ymax is not None:
+        pl.ylim(ymax=options.ymax)
+    
+    pl.savefig(output)
+elif mode == 3:
+    if not options.is_relative:
+        unit="eV/A^3"
+    else:
+        unit="arbi"
+    distance = np.zeros((num_atom_super,num_atom_super), dtype=float)
+    #Distance between each pair of atoms
+    pair_distances = np.zeros((num_atom_super,num_atom_super), dtype=float)
+    for i in range(num_atom_super):
+        for j in range(i):
+            if projection is not None:
+                vectors = \
+                get_equivalent_smallest_vectors(i, j,
+                                                supercell=supercell,
+                                                primitive_lattice=primitive.get_cell(),
+                                                symprec=1e-5)
+                vectors = np.dot(vectors, primitive.get_cell())
+                project_vector = np.eye(3)[projection]
+                d = np.abs(np.dot(vectors, project_vector)).min()
+            else:
+                d = get_distance(supercell, i, j)
+            pair_distances[i,j] = d
+            pair_distances[j,i] = d
+    
+    fc_relative_trace = np.zeros((num_atom_super,num_atom_super), dtype=float)
+    #legend = np.zeros_like(fc_relative_trace)
+
+    if options.is_relative:
+        if dirt is None:
+            self_trace = np.linalg.norm(fc[index_super, index_super])
+        else:
+            self_trace = fc[index_super, index_super, dirt[0], dirt[1], dirt[2]]
+        print "Self-interaction strength for the center atom: %f (eV/A^3)"%self_trace
+        if np.abs(self_trace) < 1e-7:
+            print "Warning: Self-interaction strength too small"
+            print "Changing to absolute value instead"
+            self_trace = 1.0
+    else:
+        self_trace = 1. 
+    for i in np.arange(num_atom_super):
+        d1 = pair_distances[index_super, i]
+        for j in np.arange(num_atom_super):
+            d2 = pair_distances[index_super, j]
+            d3 = pair_distances[i, j]
+            if options.ddefine=="min":
+                distance[i,j] = np.min([d1, d2, d3])
+            elif options.ddefine=="max":
+                distance[i,j] = np.max([d1, d2, d3])
+            elif options.ddefine=="ave":
+                distance[i,j] = np.average([d1, d2, d3])
+            elif options.ddefine == "hydraulic":
+                c = (d1 + d2 + d3) / 2.0
+                area = np.sqrt(np.abs(c * (c-d1) * (c-d2) * (c-d3)))
+                distance[i,j] = 2 * area / c if c > 1e-5 else 0
+            if dirt is not None:
+                fc_temp = fc[i, j, dirt[0], dirt[1], dirt[2]]
+            else:
+                fc_temp = np.linalg.norm(fc[i, j])
+            if options.is_log:
+                fc_relative_trace[i,j] = np.abs(fc_temp / self_trace) + 1e-10
+            else:
+                fc_relative_trace[i,j] = fc_temp / self_trace    
+            if options.xreverse is not None:
+                if distance[i, j] < reverse_range[1] and distance[i, j] > reverse_range[0]:
+                    pair_in_range.append((index_super, i, j))
+                    force_in_range.append(fc_relative_trace[i, j])
+                    dist_in_range.append(distance[i, j])
+    fc_relative_trace = (fc_relative_trace + fc_relative_trace.T) / 2
+    if options.xreverse is not None:
+        ind = np.argmax(force_in_range)
+        print "Max force component within the given distance range %f to %f" %tuple(reverse_range)
+        print "triplet:", pair_in_range[ind]
+        print 'Max force:', force_in_range[ind]
+        sys.exit(0)
+    distance_map = {}
+    for i,c1 in enumerate(chemicals):
+        for j in range(i+1):
+            c2 = chemicals[j]
+            for m in chemap[i]:
+                for n in chemap[j]:
+                    distance_map.setdefault(c1+c2, []).append([distance[m,n], fc_relative_trace[m,n]])
+    print "Distance (A) and anharmonic strength (%s)"%unit
+    for i,c1 in enumerate(chemicals):
+        for j in range(i+1):
+            c2 = chemicals[j]
+            dist = np.array(distance_map[c1+c2])
+            dargsort = np.argsort(dist[:,0])
+            distance_map[c1+c2] = np.vstack((dist[:,0][dargsort], dist[:,1][dargsort])).T
+            print "%10s %10s " %("distance", symbol+'-'+c1+'-'+c2),
+    print
+    length=0
+    while True:
+        all_empty=True
+        for i, c1 in enumerate(chemicals):
+            for j in range(i+1):
+                c2 = chemicals[j]
+                dist = distance_map[c1+c2]
+                if len(dist)<=length:
+                    print "%10s %10s " %(" ", " "),
+                else:
+                    all_empty=False
+                    print "%10.7f %10.7f " %tuple(dist[length]),
+        print 
+        length+=1
+        if all_empty:
+            break
+    colors = cm.rainbow(np.linspace(0, 1, len(chemicals) ** 2))
+    for i in np.arange(len(chemicals)):
+        for j in np.arange(i+1):
+            marker = markers.next()
+            if options.is_log:
+                pl.scatter(distance[chemap[i]][:,chemap[j]] , np.abs(fc_relative_trace[chemap[i]][:,chemap[j]]), label=symbol+"-"+chemicals[i]+"-"+chemicals[j], color=colors[i*len(chemicals)+j], marker=marker)
+            else:
+                pl.scatter(distance[chemap[i]][:,chemap[j]] , fc_relative_trace[chemap[i]][:,chemap[j]], label=symbol+"-"+chemicals[i]+"-"+chemicals[j], color=colors[i*len(chemicals)+j], marker=marker)
+    if options.is_legend:
+        pl.legend()
+    if options.is_log:
+        pl.yscale("log")
+    if options.ddefine == "min":
+        pl.xlabel("Minimum distance of the triplets (A)")
+    elif options.ddefine == "max":
+        pl.xlabel("Maximum distance of the triplets (A)")
+    elif options.ddefine == "ave":
+        pl.xlabel("Average distance of the triplets (A)")
+    pl.ylabel("Anharmonic strength (%s)"%unit)
+    #pl.ylim((fc_relative_trace.min(), fc_relative_trace.max()))
+    if options.ymin is not None:
+        pl.ylim(ymin=options.ymin)
+    if options.ymax is not None:
+        pl.ylim(ymax=options.ymax)
+    if options.output == None:
+        output = filename.split(".")[0]
+        if filename1 is not None:
+            output += "-"+filename1.split(".")[0]
+        output += '-%s.pdf'%symbol
+    else:
+        output = options.output
+    pl.savefig(output)
