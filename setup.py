@@ -29,6 +29,7 @@ setup(name='molatics',
       packages=['realmd', 'realmd.mddos', 'mdfc', 'realmd.mdkappa'],
       scripts=['scripts/mdos',
                'scripts/mkappa',
+               'scripts/fca',
                'scripts/mdfc'],
       ext_modules=[extension,
                    extension_mdfc])

@@ -49,10 +49,15 @@ def parse_FORCE_CONSTANTS_3rd_ShengBTE(primitive, supercell, filename):
         l2 = np.fromstring(f.readline(), dtype=float, sep=' ')
         l12 = np.dot([l1, l2], inv_super_lattice) # get relative cell address
         l12 -= np.rint(l12)
+        l12 += (l12 < -1e-4) # enforce l12 to be between 0 and 1
         l1, l2 = np.dot(l12, supercell.get_cell()) # return to absolute cell address
         atom0, atom1, atom2 = np.fromstring(f.readline(), dtype=int, sep=' ') - 1
+        assert np.abs(pos_prim[atom1] + l1 - pos_super).sum(axis=1).min() < 1e-4 and \
+            np.abs(pos_prim[atom2] + l2 - pos_super).sum(axis=1).min() < 1e-4, \
+        "Error during reading file " + filename
         atom1 = np.abs(pos_prim[atom1] + l1 - pos_super).sum(axis=1).argmin()
         atom2 = np.abs(pos_prim[atom2] + l2 - pos_super).sum(axis=1).argmin()
+
         for i in range(27):
             line = f.readline().split()
             a, b, c = map(lambda x: int(x) - 1, line[:-1])
