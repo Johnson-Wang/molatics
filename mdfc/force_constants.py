@@ -663,10 +663,9 @@ class ForceConstants():
 
         print "Calculating transformation coefficients..."
         self.get_fc2_coefficients()
-
         print "Number of independent fc2 components: %d" %(len(self._pairs_reduced)*9)
         self.get_irreducible_fc2_components_with_spg()
-        print "Point group invariance reduces independent fc2 components to %d" %(len(self._ifc2_ele))
+        print "Point group invariance reduces independent fc2 components to %d" %(self._ifc2_trans.shape[1])
         sys.stdout.flush()
         if is_trans_inv:
             self.get_fc2_translational_invariance()

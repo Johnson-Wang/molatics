@@ -146,7 +146,7 @@ class MolecularDynamicsForceConstant:
 
 
     def run_fc2(self):
-        self._fc.set_fc2_irreducible_elements(is_trans_inv=self._is_trans_inv, is_rot_inv=self._is_rot_inv)
+        self._fc.set_fc2_irreducible_elements(is_trans_inv=False, is_rot_inv=False)
         self._coeff2 = self._fc._coeff2
         self.ifc2_map = self._fc._ifc2_map
         self.irred_trans = self._fc._ifc2_trans
@@ -222,7 +222,7 @@ class MolecularDynamicsForceConstant:
             irred_uA_pinv = np.zeros(ddcs2.shape[::-1], dtype="double")
             _mdfc.pinv(ddcs2, irred_uA_pinv, 1e-5)
         except ImportError:
-            print "Numpy is used to to realize Moore-Penrose pseudo inverse"
+            print "Numpy is used to realize Moore-Penrose pseudo inverse"
             irred_uA_pinv = np.linalg.pinv(ddcs2)
         self.irred_fc2 = np.dot(irred_uA_pinv, forces.flatten())
 

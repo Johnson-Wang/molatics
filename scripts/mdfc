@@ -161,7 +161,7 @@ parser.add_option("--cutrf", "--cutoff_residual_force", dest="cutrf", type="floa
                   help="The cutoff residual force in predicting the equilibrium position")
 parser.add_option("--nosym", dest="is_nosym",
                   action="store_true",
-                  help="Symmetry is not imposed.")
+                  help="Symmetry (except permutation and periodic symmetries) is not imposed.")
 parser.add_option("-p", "--plot", dest="is_graph_plot",
                   action="store_true",
                   help="Plot data")
@@ -318,14 +318,9 @@ if settings.get_read_fc2() is not None:
     print "##########Checking the invariance conditions for the given force constants#############"
     show_drift_force_constants(fc.get_fc2_read())
     show_rotational_invariance(fc.get_fc2_read(), supercell=mdfc.supercell, log_level = log_level)
-    algo = 1
-    if algo == 1:
-        fc.set_fc2_irreducible_elements(is_trans_inv=settings.get_is_translational_invariance(),
-                                        is_rot_inv=settings.get_is_rotational_invariance())
-        fc.tune_fc2(log_level=log_level)
-    else:
-        fc.set_fc2_irreducible_elements()
-        fc.set_translational_rotational_invariance()
+    fc.set_fc2_irreducible_elements(is_trans_inv=settings.get_is_translational_invariance(),
+                                    is_rot_inv=settings.get_is_rotational_invariance())
+    fc.tune_fc2(log_level=log_level)
     print "##########After tunning, checking the invariance conditions for the tuned force constants#############"
     show_drift_force_constants(fc.get_fc2())
     show_rotational_invariance(fc.get_fc2(), supercell=mdfc.supercell, log_level=log_level)
