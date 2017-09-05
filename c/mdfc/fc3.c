@@ -6,7 +6,7 @@
 
 int permute3[6][3] = {{0, 1, 2},{0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
 
-F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
+MatArbiLenDBL* get_fc3_spg_invariance(int *Independents,
                                     const Triplet *triplets,
                                     const VecDBL *positions,
                                     const Symmetry *symmetry1,
@@ -18,7 +18,7 @@ F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
                                     const double lattice[3][3],
                                     const double symprec)
 {
-  F3ArbiLenDBL* transform;
+  MatArbiLenDBL* transform;
   VecArbiLenINT *operations;
   VecArbiLenINT *rotations2;
   VecArbiLenINT *rotations3;
@@ -132,15 +132,15 @@ F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
   }
   
   
-  transform = alloc_F3ArbiLenDBL(triplets->size, 27, num_ind);
-  init_df3tensor(transform->f3, triplets->size, 27, num_ind, 0.0);
+  transform = alloc_MatArbiLenDBL(27, num_ind);
+  init_dmatrix(transform->mat, 27, num_ind, 0.0);
   num_ind = 0;
   for (itriplet=0; itriplet<triplets->size; itriplet++)
   {
     for (i=0; i < NIndependent->vec[itriplet]; i++)
     {
       for (j=0; j<27; j++)
-          transform->f3[itriplet][j][num_ind + i] = transform_temp[itriplet][j][i];
+          transform->mat[j][num_ind + i] = transform_temp[itriplet][j][i];
       Independents[num_ind + i] = IndexIndependent->mat[itriplet][i] + itriplet * 27;
     }
     num_ind += NIndependent->vec[itriplet];

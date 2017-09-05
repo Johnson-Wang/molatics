@@ -3,6 +3,7 @@ import os
 from realmd.file_IO import find_pos, read_xyz_cv_file, read_md_from_hdf5, write_md_to_hdf5, get_positions_vasprun_xml,\
     get_atom_types_from_vasprun_xml
 from realmd.information import warning, error
+from realmd.memory_profiler import profile
 
 
 class MolecularDynamicsCoordinateVelocity():
@@ -46,7 +47,7 @@ class MolecularDynamicsCoordinateVelocity():
         print "Reading velocity and coordinate information"
         if not os.path.exists(filename):
             print "file:%s does not exist"%filename
-            return 0
+            return 1
         else:
             print "from file: %s" %filename
         if fileformat=="l":
@@ -148,28 +149,29 @@ class MolecularDynamicsCoordinateVelocity():
             self.atom_types = atom_types
             self.num_atom = num_atom
 
-
+    @profile
     def read_hdf5_file(self,filename):
         try:
             import h5py
-            parameters = read_md_from_hdf5(filename)
+            parameters = read_md_from_hdf5(filename, steps = self.step_range)
             if "coordinates" in parameters.keys():
-                self.atom_coordinates = parameters['coordinates'][self.step_range]
+                self.atom_coordinates = parameters['coordinates']
             if "atom_types" in parameters.keys():
                 self.atom_types = parameters["atom_types"]
             if "time_step" in parameters.keys():
                 self.time_step = parameters['time_step']
             if "velocities" in parameters.keys():
-                self.velocities = parameters["velocities"][self.step_range]
+                self.velocities = parameters["velocities"]
+
             self.num_steps,self.num_atom=self.atom_coordinates.shape[0:2]
-            self.atom_ids=np.zeros(self.num_atom,dtype=int)
-            return 1
+            self.atom_ids=np.zeros(self.num_atom, dtype=int)
+            return 0
         except ImportError:
             print "h5py not implemented"
-            return 0
+            return 1
         except IndexError:
             print "The step range chosen is out of range!"
-            return 0
+            return 1
 
     def save_cv_to_hdf5(self, filename="md_cv.hdf5"):
         "Save the coordinate and velocity information into a hdf5 file"

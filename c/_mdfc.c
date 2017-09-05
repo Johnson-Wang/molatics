@@ -119,7 +119,7 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
   double precision;
   int i, j, k;
   int trans_dimension[3], ind_dimension[1];
-  F3ArbiLenDBL *transformations;
+  MatArbiLenDBL *transformations;
   int ntriplets, natoms, nind1, nind2, maxrot2, maxrot3;
   int *mappings_atom2_1d, *mappings_atom3_1d, *nrotations_atom2, *nrotations_atom3;
   int (*rotations_atom2)[3][3], (*rotations_atom3)[3][3], *independents;
@@ -218,10 +218,10 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
                       mappings_atom3,
                       lattice,
                       precision);
-  trans_dimension[0] = ntriplets; trans_dimension[1] = 27; trans_dimension[2] = transformations->depth;
-  ind_dimension[0] = transformations->depth;
+  trans_dimension[0] = 27; trans_dimension[1] = transformations->column;
+  ind_dimension[0] = transformations->column;
   independents_py = (PyArrayObject*) PyArray_FromDims(1, ind_dimension, PyArray_INT);
-  transformations_py = (PyArrayObject*) PyArray_FromDims(3, trans_dimension, PyArray_DOUBLE);
+  transformations_py = (PyArrayObject*) PyArray_FromDims(2, trans_dimension, PyArray_DOUBLE);
   
   if (independents_py == NULL ||  transformations_py == NULL) {
     warning_print("(PyArray_FromDims, line %d, %s).\n", __LINE__, __FILE__);
@@ -231,11 +231,9 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
     
   for (i=0; i<trans_dimension[0]; i++)
     for (j=0; j<trans_dimension[1]; j++)
-      for (k=0; k<trans_dimension[2]; k++)
       {
-        *((double*)transformations_py->data + 
-          i * trans_dimension[1] * trans_dimension[2] + 
-          j * trans_dimension[2] + k) = transformations->f3[i][j][k];
+        *((double*)transformations_py->data +
+          i * trans_dimension[1] + j) = transformations->mat[i][j];
       }
       
   for (i=0; i<ind_dimension[0]; i++)
@@ -248,7 +246,7 @@ static PyObject * py_get_fc3_spg_invariance(PyObject *self, PyObject *args)
   free(ps_atom2);
   free(ps_atom3);
   free(mappings_atom1);
-  free_F3ArbiLenDBL(transformations);
+  free_MatArbiLenDBL(transformations);
   free_ivector(independents);
   free_MatArbiLenINT(mappings_atom2);
   free_F3ArbiLenINT(mappings_atom3);

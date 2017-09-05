@@ -2,8 +2,9 @@ import numpy as np
 import sys
 import scipy
 from scipy.sparse import dok_matrix, coo_matrix, csr_matrix
-from fc2 import get_atom_mapping, get_pairs_with_permute, get_fc2_coefficients, get_fc2_spg_invariance,\
+from fc2 import get_fc2_coefficients, get_fc2_spg_invariance,\
     get_fc2_translational_invariance, get_fc2_rotational_invariance, get_trim_fc2
+
 from fc3 import get_bond_symmetry, get_irreducible_triplets_with_permute, get_fc3_coefficients, get_fc3_spg_invariance,\
     get_fc3_translational_invariance, get_fc3_rotational_invariance, get_trim_fc3
 from file_IO import read_fc2_from_hdf5, read_fc3_from_hdf5, write_fc2_hdf5, write_fc3_hdf5
@@ -75,7 +76,7 @@ def get_equivalent_smallest_vectors(atom_number_supercell,
     else:
         return smallest_vectors, equivalent_directions
 
-
+from mdfc.symmetry import Symmetry
 class ForceConstants():
     def __init__(self, supercell, primitive, symmetry, is_disperse=False, cutoff=None, precision=1e-8):
         self._symmetry = symmetry
@@ -477,60 +478,67 @@ class ForceConstants():
     def set_first_independents(self):
         sym = self._symmetry
         independents = {}
-        independents['atoms'] = sym.get_independent_atoms() # independent atoms
+        independents['atoms'] = np.unique(sym.mapping) # independent atoms
         independents['natoms'] = len(independents['atoms']) # number of independent atoms
-        sym_operations = sym.get_symmetry_operations()
-        independents['rotations'] = sym_operations['rotations']
+        sym_operations = sym.symmetry_operations
+        independents['rotations'] = sym.rotations
         independents['translations'] = sym_operations['translations']
         independents['noperations'] = len(sym_operations['rotations'])
         # rotations and translations forms all the operations
-        independents['mappings'] = sym.get_map_atoms()
-        independents['mapping_operations'] = sym.get_map_operations()
+        independents['mappings'] = sym.mapping
+        independents['mapping_operations'] = sym.mapping_operations
         self._ind1 = independents
 
     def set_second_independents(self):
-        symprec = self._symmetry.get_symmetry_tolerance()
-        positions = self._supercell.get_scaled_positions()
-        indep = {}
         symmetry = self._symmetry
-        if self._ind1 == None:
-            self.set_first_independents()
-
-        site_syms_list = []
-        for atom1 in self._ind1['atoms']:
-            site_syms_list.append(symmetry.get_site_symmetry(atom1))
-        indep['noperations'] = np.array([len(site_sym) for site_sym in site_syms_list], dtype="intc")
-        max_size = np.max(indep['noperations'])
-        site_syms = np.zeros((self._ind1['natoms'], max_size, 3, 3), dtype=np.float)
-        for i in range(self._ind1['natoms']):
-            site_syms[i,:indep['noperations'][i]] = np.array(site_syms_list[i])
-        indep['rotations'] = site_syms
-        indep['translations'] = None
-        mappings = np.zeros((self._ind1['natoms'], self._num_atom), dtype="intc")
-        mapping_operations = np.zeros((self._ind1['natoms'], self._num_atom), dtype="intc")
-        for i, atom1 in enumerate(self._ind1['atoms']):
-            mappings[i], mapping_operations[i] = get_atom_mapping(atom1,
-                                                                  np.array(site_syms_list[i]),
-                                                                  positions,
-                                                                  symprec=symprec,
-                                                                  is_return_opes=True)
-        indep['mappings'] = mappings
-        indep['mapping_operations'] = mapping_operations
-        indep['natoms'] = np.array([len(np.unique(mappings[i])) for i in range(self._ind1['natoms'])], dtype="intc")
-        ind_atom2 = np.zeros((self._ind1['natoms'], np.max(indep['natoms'])), dtype="intc")
-        for i, atom1 in enumerate(self._ind1['atoms']):
-            ind_atom2[i, :indep['natoms'][i]] = np.unique(mappings[i])
-        indep['atoms'] = ind_atom2
-        self._ind2 = indep
         pairs = []
-        for i, atom1 in enumerate(self._ind1['atoms']):
-            for j, atom2 in enumerate(self._ind2['atoms'][i, :self._ind2['natoms'][i]]):
-                pairs.append((atom1, atom2))
+        for atom1 in np.unique(symmetry.mapping):
+            mapping2 = []
+            for atom2 in np.arange(self._num_atom):
+                mapatom, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2)
+                mapping2.append(mapatom)
+
+            for atom2 in np.unique(mapping2):
+                if symmetry.mapping[atom2] < atom1:
+                    continue
+                # symmetry.mapping[atom2] equals atom1
+                nope = symmetry.mapping_operations[atom2]
+                atom2_ = symmetry.get_atom_sent_by_operation(atom1, nope)
+                atom2_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2_)
+                if atom2_ < atom2:
+                    continue
+                else:
+                    pairs.append((atom1, atom2))
         self._pairs = pairs
+        # indep['noperations'] = np.array([len(site_sym) for site_sym in site_syms_list], dtype="intc")
+        # max_size = np.max(indep['noperations'])
+        # site_syms = np.zeros((self._ind1['natoms'], max_size, 3, 3), dtype=np.float)
+        # for i in range(self._ind1['natoms']):
+        #     site_syms[i,:indep['noperations'][i]] = np.array(site_syms_list[i])
+        # indep['rotations'] = site_syms
+        # indep['translations'] = None
+        # mappings = np.zeros((self._ind1['natoms'], self._num_atom), dtype="intc")
+        # mapping_operations = np.zeros((self._ind1['natoms'], self._num_atom), dtype="intc")
+        # for i, atom1 in enumerate(self._ind1['atoms']):
+        #     mappings[i], mapping_operations[i] = self._symmetry.get_atom_mapping_under_symmetries(
+        #         np.array(site_syms_list[i]), atom1)
+        # indep['mappings'] = mappings
+        # indep['mapping_operations'] = mapping_operations
+        # indep['natoms'] = np.array([len(np.unique(mappings[i])) for i in range(self._ind1['natoms'])], dtype="intc")
+        # ind_atom2 = np.zeros((self._ind1['natoms'], np.max(indep['natoms'])), dtype="intc")
+        # for i, atom1 in enumerate(self._ind1['atoms']):
+        #     ind_atom2[i, :indep['natoms'][i]] = np.unique(mappings[i])
+        # indep['atoms'] = ind_atom2
+        # self._ind2 = indep
+        # pairs = []
+        # for i, atom1 in enumerate(self._ind1['atoms']):
+        #     for j, atom2 in enumerate(self._ind2['atoms'][i, :self._ind2['natoms'][i]]):
+        #         pairs.append((atom1, atom2))
+        # self._pairs = pairs
 
     def set_pair_reduced_included(self, pair_inclusion=None):
         if pair_inclusion is None:
-            pair_inclusion = np.ones(len(self._pairs_reduced), dtype=bool)
+            pair_inclusion = np.ones(len(self._pairs), dtype=bool)
         self._pairs_included = pair_inclusion
 
     def set_triplet_reduced_included(self, triplet_inclusion=None):
@@ -553,40 +561,34 @@ class ForceConstants():
                                    ind2['rotations'],
                                    ind2['mappings'],
                                    ind2['mapping_operations'])
+
         self._pairs_reduced = [self._pairs[i] for i in np.unique(self._pair_mappings)]
 
     def get_fc2_coefficients(self):
-        ind1 = self._ind1
-        ind2 = self._ind2
-        self._coeff2, self._ifc2_map =\
-            get_fc2_coefficients(self._pairs,
-                                 self._pair_mappings,
-                                 self._pair_transforms,
-                                 self._supercell.get_cell().T,
-                                 self._supercell.get_scaled_positions(),
-                                 ind1['rotations'],
-                                 ind1['translations'],
-                                 ind1['atoms'],
-                                 ind1['mappings'],
-                                 ind1['mapping_operations'],
-                                 ind2['rotations'],
-                                 ind2['mappings'],
-                                 ind2['mapping_operations'])
+        self._ifc2_map, self._coeff2 = get_fc2_coefficients(self._pairs, self._symmetry)
 
-    def get_irreducible_fc2_components_with_spg(self):
+    def get_irreducible_fc2_components_with_spg(self, is_md=False):
         ind1 = self._ind1
         ind2 = self._ind2
-        self._ifc2_ele, self._ifc2_trans = \
-            get_fc2_spg_invariance(np.array(self._pairs_reduced),
-                                   self._supercell.get_scaled_positions(),
-                                   ind1['rotations'],
-                                   ind1['translations'],
-                                   ind1['mappings'],
-                                   ind2['rotations'],
-                                   ind2['noperations'],
-                                   ind2['mappings'],
-                                   self._supercell.get_cell().T,
-                                   self._symmetry.get_symmetry_tolerance())
+        get_rot = lambda rot_index: self._symmetry.pointgroup_operations(rot_index).copy()
+        ifc2_ele, ifc2_trans = \
+            get_fc2_spg_invariance(self._pairs,
+                                   self._symmetry)
+        num_irred = [len(ele) for ele in ifc2_ele]
+
+        if not is_md:
+            ifc2_ele_array = np.zeros(sum(num_irred), dtype=int)
+            trans = np.zeros((len(ifc2_ele), 9, sum(num_irred)), dtype="float")
+            for i, length in enumerate(num_irred):
+                start = sum(num_irred[:i])
+                end = start + length
+                ifc2_ele_array[start:end] = np.array(ifc2_ele[i]) + i * 9
+                trans[i,:, start:end] = ifc2_trans[:, start:end]
+            self._ifc2_ele = ifc2_ele_array
+            self._ifc2_trans = trans
+        else:
+            self._ifc2_ele = ifc2_ele
+            self._ifc2_trans = ifc2_trans
 
     def get_fc2_translational_invariance(self):
         if self._fc2_read is not None:
@@ -643,47 +645,48 @@ class ForceConstants():
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='trimming')
 
-    def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False):
-        self.set_first_independents()
+    def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False, is_md=False):
+        # self.set_first_independents()
+        equivalent_atoms = self._symmetry.mapping
         print "Under the system symmetry"
-        print "Number of first independent atoms: %4d" % self._ind1['natoms']
+        print "Number of first independent atoms: %4d" % len(np.unique(equivalent_atoms))
         self.set_second_independents()
-        print "Number of second independent atoms" + " %4d" * len(self._ind2['natoms']) % tuple(self._ind2['natoms'])
-        self.get_irreducible_fc2s_with_permute()
-        print "Permutation symmetry reduces number of irreducible pairs from %4d to %4d"\
-              %(self._ind2['natoms'].sum(), len(self._pairs_reduced))
+        # print "Number of second independent atoms" + " %4d" * len(self._ind2['natoms']) % tuple(self._ind2['natoms'])
+        # self.get_irreducible_fc2s_with_permute()
+        print "Number of irreducible pairs: %4d" %len(self._pairs)
 
         if (self._cutoff is not None) and (self._cutoff.get_cutoff_radius()is not None):
-            pair_inclusion = self._cutoff.get_pair_inclusion(pairs=self._pairs_reduced)
+            pair_inclusion = self._cutoff.get_pair_inclusion(pairs=self._pairs)
             self.set_pair_reduced_included(pair_inclusion)
             print "The artificial cutoff reduces number of irreducible pairs from %4d to %4d"\
-                  %(len(self._pairs_reduced), np.sum(self._pairs_included))
+                  %(len(self._pairs), np.sum(self._pairs_included))
         else:
             self.set_pair_reduced_included()
 
         print "Calculating transformation coefficients..."
         self.get_fc2_coefficients()
-        print "Number of independent fc2 components: %d" %(len(self._pairs_reduced)*9)
-        self.get_irreducible_fc2_components_with_spg()
+        print "Number of independent fc2 components: %d" %(len(self._pairs)*9)
+        self.get_irreducible_fc2_components_with_spg(is_md)
         print "Point group invariance reduces independent fc2 components to %d" %(self._ifc2_trans.shape[1])
         sys.stdout.flush()
-        if is_trans_inv:
-            self.get_fc2_translational_invariance()
-            print "Translational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
-        if is_rot_inv:
-            self.get_fc2_rotational_invariance()
-            print "Rotational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
-        if not np.all(self._pairs_included):
-            self.set_trim_fc2()
-            print "Interaction distance cutoff further reduces independent fc2 components to %d" %len(self._ifc2_ele)
-        print "Independent fc2 components calculation completed"
-        if DEBUG:
-            from mdfc.file_IO import read_fc2_from_hdf5
-            fc2 = read_fc2_from_hdf5("fc2.hdf5")
-            fc2_reduced = np.array([fc2[pai] for pai in self._pairs_reduced])
-            fc2p = fc2_reduced.flatten()[self._ifc2_ele]
-            pp = np.einsum('ijkl, ijl-> ijk', self._coeff2, fc2_reduced[self._ifc2_map].reshape(self._num_atom, self._num_atom, 9)).reshape(self._num_atom, self._num_atom, 3, 3)
-        sys.stdout.flush()
+        if not is_md:
+            if is_trans_inv:
+                self.get_fc2_translational_invariance()
+                print "Translational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+            if is_rot_inv:
+                self.get_fc2_rotational_invariance()
+                print "Rotational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+            if not np.all(self._pairs_included):
+                self.set_trim_fc2()
+                print "Interaction distance cutoff further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+            print "Independent fc2 components calculation completed"
+            if DEBUG:
+                from mdfc.file_IO import read_fc2_from_hdf5
+                fc2 = read_fc2_from_hdf5("fc2.hdf5")
+                fc2_reduced = np.array([fc2[pai] for pai in self._pairs_reduced])
+                fc2p = fc2_reduced.flatten()[self._ifc2_ele]
+                pp = np.einsum('ijkl, ijl-> ijk', self._coeff2, fc2_reduced[self._ifc2_map].reshape(self._num_atom, self._num_atom, 9)).reshape(self._num_atom, self._num_atom, 3, 3)
+            sys.stdout.flush()
 
     def tune_fc2(self, is_minimize_relative_error=False, log_level=1):
         self._fc2 = np.zeros_like(self._fc2_read)
@@ -907,7 +910,7 @@ class ForceConstants():
                     atom2,
                     symprec)
                 bond_syms.append(reduced_bond_sym)
-                atom_mappings, mapping_operations = get_atom_mapping(atom2, reduced_bond_sym, positions, symprec, True)
+                atom_mappings, mapping_operations = self._symmetry.get_atom_mapping_under_sitesymmetry(atom2, reduced_bond_sym, positions, symprec, True)
                 ind_mappings[i,j] = atom_mappings
                 ind_mapping_opes[i,j] = mapping_operations
                 nind_atoms[i,j] = len(np.unique(atom_mappings))
@@ -1092,14 +1095,14 @@ class ForceConstants():
         self._fc3_eye_mappings = fc3_eye_mappings
 
     @timeit
-    def get_irreducible_fc3_components_with_spg(self, lang="C"):
+    def get_irreducible_fc3_components_with_spg(self, lang="C", is_md = False):
         ind1 = self._ind1
         ind2 = self._ind2
         ind3 = self._ind3
         if self._is_disperse:
             lang = "py"
         if lang == "py":
-            self._ifc3_ele, self._ifc3_trans = \
+            ifc3_ele, ifc3_trans = \
                 get_fc3_spg_invariance(self._triplets_reduced,
                                        self._positions,
                                        ind1['rotations'],
@@ -1112,11 +1115,11 @@ class ForceConstants():
                                        ind3['noperations'],
                                        ind3['mappings'],
                                        self._lattice,
-                                       self._symprec,
-                                       is_disperse=self._is_disperse)
+                                       self._symprec)
+
         else:
             import _mdfc
-            self._ifc3_ele, self._ifc3_trans = \
+            ifc3_ele, ifc3_trans = \
             _mdfc.get_fc3_spg_invariance(np.array(self._triplets_reduced, dtype="intc"),
                                        self._positions.copy(),
                                        ind1['rotations'].astype("intc"),
@@ -1130,15 +1133,44 @@ class ForceConstants():
                                        ind3['mappings'].astype("intc"),
                                        self._lattice.copy(),
                                        self._symprec)
-        if DEBUG:
-            fc3_read = self._fc3_read
-            fc3_reduced_triplets = np.double([fc3_read[index] for index in self._triplets_reduced])
-            fc3_reduced = fc3_reduced_triplets.flatten()[self._ifc3_ele]
-            fc3_reduced_triplets2 = np.zeros_like(fc3_reduced_triplets)
-            for i in range(len(fc3_reduced_triplets)):
-                fc3_reduced_triplets2[i] = mat_dot_product(self._ifc3_trans[i], fc3_reduced, is_sparse=self._is_disperse)
-            diff = fc3_reduced_triplets2 - fc3_reduced_triplets.reshape(-1, 27)
-            print np.abs(diff).max()
+        independents = []
+        for i in range(len(self._triplets_reduced)):
+            indep, = np.where(ifc3_ele // 27 == i)
+            independents.append(indep)
+        num_irred = [len(ind) for ind in independents]
+
+        if is_md:
+            self._ifc3_ele = independents
+            self._ifc3_trans = ifc3_trans
+        else:
+            if self._is_disperse:
+                from scipy.sparse import coo_matrix
+                trans = []
+                for i, in range(len(self._triplets_reduced)):
+                    start = sum(num_irred[:i])
+                    length = num_irred[i]
+                    transform_tmp = np.zeros((27, sum(num_irred)), dtype="float")
+                    transform_tmp[:, start:start + length] = ifc3_trans[:, start:start + length]
+                    non_zero = np.where(np.abs(transform_tmp) > self._symprec)
+                    transform_tmp_sparse = coo_matrix((transform_tmp[non_zero], non_zero), shape=transform_tmp.shape)
+                    trans.append(transform_tmp_sparse)
+            else:
+                trans = np.zeros((len(self._triplets_reduced), 27, sum(num_irred)), dtype="float")
+                for i in range(len(self._triplets_reduced)):
+                    start = sum(num_irred[:i])
+                    length = num_irred[i]
+                    trans[i,:, start:start + length] = ifc3_trans[:, start:start + length]
+            self._ifc3_ele = ifc3_ele
+            self._ifc3_trans = trans
+            if DEBUG:
+                fc3_read = self._fc3_read
+                fc3_reduced_triplets = np.double([fc3_read[index] for index in self._triplets_reduced])
+                fc3_reduced = fc3_reduced_triplets.flatten()[self._ifc3_ele]
+                fc3_reduced_triplets2 = np.zeros_like(fc3_reduced_triplets)
+                for i in range(len(fc3_reduced_triplets)):
+                    fc3_reduced_triplets2[i] = mat_dot_product(self._ifc3_trans[i], fc3_reduced, is_sparse=self._is_disperse)
+                diff = fc3_reduced_triplets2 - fc3_reduced_triplets.reshape(-1, 27)
+                print np.abs(diff).max()
 
     def get_fc3_translational_invariance(self):
         if self._fc3_read is not None:
@@ -1293,7 +1325,7 @@ if __name__=="__main__":
 
 
     from phonopy.interface import vasp
-    from phonopy.structure.symmetry import Symmetry
+    # from phonopy.structure.symmetry import Symmetry
     from phonopy.structure.cells import get_supercell
     unitcell = vasp.read_vasp("POSCAR")
     supercell=get_supercell(unitcell,2 * np.eye(3, dtype="intc"))

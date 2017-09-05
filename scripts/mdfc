@@ -349,6 +349,7 @@ if settings.get_read_fc3() is not None:
 if log_level:
     print "------------------------------- Reading MD information-----------------------------------------------"
 md = MDFE(step_range=settings.get_step_range())
+
 md._set_from_file(fileformat=settings.get_file_format(),
                   cv_filename=settings.get_coord_filename(),
                   fe_filename=settings.get_force_filename())
@@ -373,10 +374,14 @@ if log_level:
 mdfc.init_disp_and_forces(coordinates = md.atom_coordinates, forces = md.atom_forces)
 
 if settings.get_is_fc2():
+    print "##################Reducing total number of fc2#############################"
     mdfc.run_fc2()
 if settings.get_is_fc3():
+    print "##################Reducing total number of fc3#############################"
     mdfc.run_fc3()
 
+print "###################Fitting force constants##############################"
+mdfc.calculate_fcs()
 if log_level > 0:
     if no_error:
         print_end()

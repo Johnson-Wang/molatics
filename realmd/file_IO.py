@@ -402,14 +402,14 @@ def get_one_step_number_of_lines(filename):
 #     return 1
 
 
-def read_xyz_fe_file(filename, num_atom, step_range=slice(None)):
+def read_xyz_fe_file(filename, num_atom, steps=slice(None)):
     "unit of force: Ha/Bohr (au), energy: Hartree (au)"
     mode, num_mode_line = get_one_step_number_of_lines(filename)
     input_file=file(filename)
     file_all = input_file.read()
     file_list_all=file_all.split('MD step:')[1:]
     try:
-        file_list=file_list_all[step_range]
+        file_list=file_list_all[steps]
     except IndexError:
         return None
     data_length = len(file_list)
@@ -463,17 +463,21 @@ def write_md_to_hdf5(filename="mdinfo.hdf5",
     o.close()
 
 
-def read_md_from_hdf5(filename):
+def read_md_from_hdf5(filename, steps=None):
     import h5py
     i=h5py.File(filename,'r')
     parameters = {}
     for key in i.keys():
-        parameters.setdefault(key, i[key].value)
+        if steps is not None and\
+            key in ('coordinates', 'velocities', 'energies', 'forces', 'stresses'):
+            parameters.setdefault(key, i[key][steps])
+        else:
+            parameters.setdefault(key, i[key].value)
     i.close()
     return parameters
 
 
-def read_md_from_vasprun(vasp_filename):
+def read_md_from_vasprun(vasp_filename, steps=None):
     from lxml import etree
     f = open(vasp_filename, "r")
     lines = f.read()
@@ -494,14 +498,17 @@ def read_md_from_vasprun(vasp_filename):
                     force.append([float(x) for x in v.text.split()])
             forces.append(force)
             break
-    parameter = {'forces': np.array(forces, dtype="double")}
+    if steps is not None:
+        parameter = {'forces': np.array(forces, dtype="double")[steps]}
+    else:
+        parameter = {'forces': np.array(forces, dtype="double")}
     return parameter
 
 if __name__=="__main__":
     # read_xyz_fe_file3(filename="heat_flux0.out", num_atom=64, return_info=['force'], step_range=slice(None))
     # read_xyz_fe_file2(filename="heat_flux0.out", num_atom=64, return_info=['force'], step_range=slice(None))
     # read_xyz_fe_file2(filename="heat_flux0.out", num_atom=64, return_info=['force'], step_range=slice(None))
-    parameters, mode = read_xyz_fe_file(filename="heat_flux0.out", num_atom=64, return_info=['force', 'energy'], step_range=slice(None))
+    parameters, mode = read_xyz_fe_file(filename="heat_flux0.out", num_atom=64, return_info=['force', 'energy'], steps=slice(None))
 
     for i, p in zip(mode, parameters):
         print "The returned information is: %s"%i

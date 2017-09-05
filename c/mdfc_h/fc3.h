@@ -1,5 +1,5 @@
 #include "mathfunc.h"
-F3ArbiLenDBL* get_fc3_spg_invariance(int *Independents,
+MatArbiLenDBL* get_fc3_spg_invariance(int *Independents,
                                     const Triplet *triplets,
                                     const VecDBL *positions,
                                     const Symmetry *symmetry1,

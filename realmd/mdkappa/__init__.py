@@ -4,8 +4,7 @@ from realmd.file_IO import read_xyz_fe_file, write_md_to_hdf5, read_md_from_hdf5
 from realmd.mddos import MolecularDynamicsCoordinateVelocity as MDCV
 from realmd.unit import au_energy, au_force
 from realmd.information import warning
-
-
+from realmd.memory_profiler import profile
 class MolecularDynamicsForceEnergy(MDCV):
     "Force, energy and coordinate information read from MD steps"
     def __init__(self, step_range=slice(None), time_step=None):
@@ -15,13 +14,14 @@ class MolecularDynamicsForceEnergy(MDCV):
         self.atom_stresses = None
         self.volume = None
 
+    @profile
     def _set_from_file(self, fileformat="x", cv_filename="geo_end.xyz", fe_filename="fe.out"):
         "cv_filename: coordinates and velocities filename; fe_filename: forces and energies filename"
         if cv_filename == None:
             cv_filename = "geo_end.xyz"
         if fe_filename == None:
             fe_filename = "fe.out"
-        MDCV.set_from_file(self,fileformat=fileformat, filename=cv_filename)
+        MDCV.set_from_file(self, fileformat=fileformat, filename=cv_filename)
         self.print_information()
         if not os.path.exists(fe_filename):
             print "Reading force and energy information"
@@ -32,27 +32,23 @@ class MolecularDynamicsForceEnergy(MDCV):
     def read_fe_file(self, filename):
         parameters = {}
         if self.fileformat == "x":
-            parameters = read_xyz_fe_file(filename, self.num_atom, step_range=self.step_range)
+            parameters = read_xyz_fe_file(filename, self.num_atom, steps=self.step_range)
         elif self.fileformat == "l":
-            self.read_lammps_fe_file(filename)
+            self.read_lammps_fe_file(filename, steps=self.step_range)
         elif self.fileformat == "h":
-            parameters = read_md_from_hdf5(filename)
+            parameters = read_md_from_hdf5(filename, steps=self.step_range)
         elif self.fileformat == "v":
-            parameters = read_md_from_vasprun(filename)
-        if self.fileformat == "h":
-            _slice = self.step_range
-        else:
-            _slice = slice(None)
+            parameters = read_md_from_vasprun(filename, steps=self.step_range)
         # it is supposed that those units has already been converted in the subroutine
         if "energies" in parameters.keys():
-            self.atom_energies = parameters['energies'][_slice]
+            self.atom_energies = parameters['energies']
         if "forces" in parameters.keys():
-            self.atom_forces = parameters['forces'][_slice]
+            self.atom_forces = parameters['forces']
         if "stresses" in parameters.keys():
-            self.atom_stresses = parameters['stresses'][_slice]
+            self.atom_stresses = parameters['stresses']
         return 1
 
-    def read_lammps_fe_file(self, filename):
+    def read_lammps_fe_file(self, filename, steps=None):
         input_file=file(filename,'r')
         file_all=input_file.read()
         file_list=file_all.split('ITEM: TIMESTEP\n')[1:]
@@ -92,7 +88,7 @@ class MolecularDynamicsForceEnergy(MDCV):
         input_file.close()
 
     def read_xyz_fe_file(self,filename):
-        parameters = read_xyz_fe_file(filename, self.num_atom, step_range=self.step_range)
+        parameters = read_xyz_fe_file(filename, self.num_atom, steps=self.step_range)
         if "energy" in parameters.keys():
             self.atom_energies = parameters['energy'] * au_energy
         if "force" in parameters.keys():

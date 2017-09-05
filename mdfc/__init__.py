@@ -2,7 +2,7 @@ __author__ = 'xinjiang'
 
 import sys
 import numpy as np
-from phonopy.structure.symmetry import Symmetry
+from mdfc.symmetry import Symmetry
 from phonopy.structure.cells import get_supercell, Primitive
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
 from phonopy.file_IO import write_FORCE_CONSTANTS, write_force_constants_to_hdf5, read_force_constants_hdf5
@@ -15,9 +15,9 @@ from mdfc.force_constants import ForceConstants
 from realmd.information import timeit, print_error_message, warning
 from copy import deepcopy
 from phonopy.interface.vasp import write_vasp
-# from realmd.memory_profiler import profile
+from realmd.memory_profiler import profile
 
-
+#@profile
 def print_irred_fc2(pairs_reduced, ifc2_ele, irred_fc2):
     tensor = {0:'xx', 1:'xy', 2:'xz', 3:'yx', 4:'yy', 5:'yz', 6:'zx', 7:'zy',8:'zz'}
     print "Irreducible fc2 elements: (eV/A^2)"
@@ -85,6 +85,7 @@ class MolecularDynamicsForceConstant:
         self._positions = self.supercell.get_scaled_positions()
         self._lattice = self.supercell.get_cell()
         self._num_atom = len(self._positions)
+        self._normalize_factor = 1.
         self.ifc2_map = None
         self._coeff2 = None
         self._ind_atoms2 = None
@@ -144,16 +145,16 @@ class MolecularDynamicsForceConstant:
         return self._fc2
     fc2 = property(get_fc2)
 
-
+    #@profile
     def run_fc2(self):
-        self._fc.set_fc2_irreducible_elements(is_trans_inv=False, is_rot_inv=False)
+        self._fc.set_fc2_irreducible_elements(is_md=True)
         self._coeff2 = self._fc._coeff2
         self.ifc2_map = self._fc._ifc2_map
-        self.irred_trans = self._fc._ifc2_trans
-        self._num_irred_fc2 = len(self._fc._ifc2_ele)
+        self.irred_trans2 = self._fc._ifc2_trans
+        self._num_irred_fc2 = self._fc._ifc2_trans.shape[-1]
         # self.set_disp_and_forces()
-        for i in self:
-            pass
+        # for i in self:
+        #     pass
 
 
     def next(self):
@@ -175,8 +176,8 @@ class MolecularDynamicsForceConstant:
             cell.set_positions(self._pos_equi)
             write_vasp("POSCAR_FC2", cell, direct=False)
 
-
-    def init_disp_and_forces(self, coordinates=None, forces=None):
+    #@profile
+    def init_disp_and_forces(self, coordinates=None, forces=None, is_normalize=True):
         self._forces = - forces # the negative sign enforces F = Phi .dot. U
         self._resi_force = np.average(forces, axis=0)
         self._resi_force_abs = np.zeros_like(self._resi_force)
@@ -187,9 +188,15 @@ class MolecularDynamicsForceConstant:
         assert (np.abs(self._displacements).max(axis=(0,1)) <  np.sqrt(np.sum(self.supercell.get_cell() ** 2, axis=0)) / 2).all(),\
             "The coordinates should not be folded, that is, once an atom goes beyond the box\
                it should not be dragged to the opposite corner"
+        if is_normalize:
+            print "The displacements are normalized to have unit max displacement"
+            # disp_norm = np.sqrt(np.average(self._displacements ** 2, axis=0)).max()
+            disp_norm = np.average(np.abs(self._displacements), axis=0).max()
+            self._displacements /= disp_norm
+            self._normalize_factor = disp_norm
         self.show_residual_forces()
 
-    @timeit
+    #@profile
     def set_disp_and_forces(self, lang="C"):
         num_step = len(self._displacements)
         # self.irred_fc = np.zeros(self._num_irred_fc2, dtype="double")
@@ -307,26 +314,27 @@ class MolecularDynamicsForceConstant:
         self._pos_equi -= disp
         self._displacements += disp
 
-    @timeit
-    def set_fc3_irreducible_components(self):
+    #@profile
+    def set_fc3_irreducible_components(self, is_md=False):
         fc = self._fc
         fc.set_third_independents()
         print "Number of 3rd IFC: %d" %(27 * len(fc._triplets))
         fc.get_irreducible_fc3s_with_permute()
         print "Permutation reduces 3rd IFC to %d"%(27 * len(fc._triplets_reduced))
-        fc.get_irreducible_fc3_components_with_spg()
+        fc.get_irreducible_fc3_components_with_spg(is_md=is_md)
         print "spg invariance reduces 3rd IFC to %d"%(len(fc._ifc3_ele))
         print "Calculating fc3 coefficient..."
         fc.get_fc3_coefficients()
-        if self._is_trans_inv:
-            fc.get_fc3_translational_invariance()
-            print "translational invariance reduces 3rd IFC to %d"%(len(fc._ifc3_ele))
-        if self._is_rot_inv and self.fc2 is not None:
-            fc.get_fc3_rotational_invariance(self._fc2)
-            print "rotational invariance reduces 3rd IFC to %d"%(len(fc._ifc3_ele))
-        self._num_irred_fc3 = len(fc._ifc3_ele)
+        if not is_md:
+            if self._is_trans_inv:
+                fc.get_fc3_translational_invariance()
+                print "translational invariance reduces 3rd IFC to %d"%(len(fc._ifc3_ele))
+            if self._is_rot_inv and self.fc2 is not None:
+                fc.get_fc3_rotational_invariance(self._fc2)
+                print "rotational invariance reduces 3rd IFC to %d"%(len(fc._ifc3_ele))
+            self._num_irred_fc3 = len(fc._ifc3_ele)
 
-    @timeit
+    #@profile
     def calculate_irreducible_fc3(self):
         fc = self._fc
         coeff = fc._coeff3
@@ -361,16 +369,53 @@ class MolecularDynamicsForceConstant:
         self._fc3_irred = 2 * np.dot(pinv, self._forces1.flatten())
         self._forces2 = self._forces1 - 1./2. * np.dot(ddcs, self._fc3_irred) # residual force after 3rd IFC
 
+    def calculate_fcs(self):
+        fc = self._fc
+        coeff = fc._coeff3
+        ifcmap = fc._ifc3_map
+        ifc3_ele = [len(ele) for ele in fc._ifc3_ele]
+        trans = fc._ifc3_trans
+        num_irred = trans.shape[-1]
+        num_step = len(self._displacements)
+        first_atoms, indices = np.unique(self._supercell.get_supercell_to_unitcell_map(), return_inverse=True)
+        pos = self.supercell.get_scaled_positions()
+        sys.stdout.flush()
+        first_map = self._supercell.get_supercell_to_unitcell_map()
+
+        for atom1 in np.arange(self._num_atom):
+            index1 = indices[atom1]
+            atom1_ = first_atoms[index1]
+            disp = pos[atom1_] - pos[atom1]
+            for atom2 in np.arange(self._num_atom):
+                atom2_ = get_atom_sent_by_operation(atom2, pos, np.eye(3), disp)
+                for atom3 in np.arange(atom2, self._num_atom):
+                    atom3_ = get_atom_sent_by_operation(atom3, pos, np.eye(3), disp)
+                    disp3 = self._displacements[:,atom3]
+                    num_triplet = ifcmap[index1, atom2_, atom3_]
+                    start = sum(ifc3_ele[:num_triplet])
+                    end = start + ifc3_ele[num_triplet]
+                    fc3_triplet = np.dot(trans[:, start:end], self._fc3_irred[start:end])
+                    fc3 = np.dot(coeff[index1, atom2_, atom3_], fc3_triplet).reshape(3,3,3)
+                    sum_temp  = np.einsum("ijkn, Nj, Nk -> Nin", coeff_temp, disp2, disp3)
+                    if atom2 == atom3:
+                        sum_temp *= 2
+                    ddcs[:,atom1] += sum_temp
+        import _mdfc as mdfc
+        # ddcs3 = np.zeros((num_step * self._num_atom * 3, num_irred), dtype="double")
+        # ddcs = np.zeros((num_step, self._num_atom, 3, num_irred), dtype="double") #displacements  rearrangement as the coefficients of fc3
+        # mdfc.rearrange_disp_fc3(ddcs,
+        #                         self._displacements,
+        #                         coeff,
+        #                         trans,
+        #                         ifcmap,
+        #                         1e-6)
 
 
-
-    # def calculate_fcs(self):
-    #     self._fc_irred = np.zeros((self._divide, self._ddcs.shape[-1]), dtype="double")
-    #     for i in range(self._divide):
-    #         ddcs = self._ddcs[i]
-    #         pinv = np.linalg.pinv(ddcs)
-    #         fcs = np.dot(pinv, self._forces.flatten())
-    #         self._fc_irred[i] = fcs
+        for i in range(self._divide):
+            ddcs = self._ddcs[i]
+            pinv = np.linalg.pinv(ddcs)
+            fcs = np.dot(pinv, self._forces.flatten())
+            self._fc_irred[i] = fcs
 
 
 
@@ -413,14 +458,19 @@ class MolecularDynamicsForceConstant:
             print "Total: %7.4e %7.4e %7.4e" %tuple(np.average(resi_force, axis=0))
         sys.stdout.flush()
 
-    @timeit
+    #@profile
     def run_fc3(self):
-        self.set_fc3_irreducible_components()
-        self.calculate_irreducible_fc3()
-        self.show_residual_fc3()
-        self.distribute_fc3()
-        print_irred_fc3(self._fc._triplets_reduced, self._fc._ifc3_ele, self._fc3_irred)
-        write_fc3_hdf5(self._fc3)
+        self.set_fc3_irreducible_components(is_md=True)
+        self._coeff3 = self.fc._coeff3
+        self.ifc3_map = self.fc._ifc3_map
+        self.irred_trans3 = self.fc._ifc3_trans
+        self._num_irred_fc3 = self._fc._ifc3_trans.shape[-1]
+
+        # self.calculate_irreducible_fc3()
+        # self.show_residual_fc3()
+        # self.distribute_fc3()
+        # print_irred_fc3(self._fc._triplets_reduced, self._fc._ifc3_ele, self._fc3_irred)
+        # write_fc3_hdf5(self._fc3)
         # for atom1 in np.arange(self._num_atom):
         #     for atom2 in np.arange(self._num_atom):
         #         disp2 = self._displacements[:,atom2]
@@ -466,8 +516,8 @@ class MolecularDynamicsForceConstant:
 
     def _set_supercell(self):
         supercell = get_supercell(self._unitcell,
-                                        self._supercell_matrix,
-                                        self._symprec)
+                                self._supercell_matrix,
+                                self._symprec)
         self.set_supercell(supercell)
         self._primitive = Primitive(supercell,
                                     np.linalg.inv(self._supercell_matrix),
@@ -475,8 +525,50 @@ class MolecularDynamicsForceConstant:
 
     def _set_symmetry(self):
         self._symmetry = Symmetry(self._supercell,
-                                  self._symprec,
-                                  self._is_symmetry)
+                                  self._symprec)
+        self._pointgroup_operations = self._symmetry.get_pointgroup_operations()
+
+        # independents['atoms'] = sym.get_independent_atoms() # independent atoms
+        # independents['natoms'] = len(independents['atoms']) # number of independent atoms
+        # sym_operations = sym.get_symmetry_operations()
+        # independents['rotations'] = sym_operations['rotations']
+        # independents['translations'] = sym_operations['translations']
+        # independents['noperations'] = len(sym_operations['rotations'])
+        # # rotations and translations forms all the operations
+        # independents['mappings'] = sym.get_map_atoms()
+        # independents['mapping_operations'] = sym.get_map_operations()
+
+        # num_rot = len(self._pointgroup_operations)
+        # self._rot_mult = np.zeros((num_rot,num_rot), dtype="intc")
+        # self._rot_inv = np.zeros(num_rot, dtype='intc')
+        # for i, pg1 in enumerate(self._pointgroup_operations):
+        #     for j, pg2 in enumerate(self._pointgroup_operations):
+        #         pg = np.dot(pg1, pg2)
+        #         for k, pg3 in enumerate(self._pointgroup_operations):
+        #             if (pg == pg3).all():
+        #                 break
+        #         self._rot_mult[i, j] = k
+        #         if k == 0: # rot1.dot.rot2 == I
+        #             self._rot_inv[i] = j
+        # lattice = self.supercell.get_cell().T
+        # rot_cart = np.array([np.dot(np.dot(lattice, rot), np.linalg.inv(lattice))
+        #             for rot in self._pointgroup_operations], dtype='double')
+        # self._rot_tensor2 = np.zeros((len(rot_cart)*2, 9, 9), dtype='double') # 2 represents the possibility of inversion
+        #
+        # for i, rot in enumerate(rot_cart):
+        #     outer = np.kron(rot, rot)
+        #     self._rot_tensor2[i] = outer
+        #     self._rot_tensor2[i+len(rot_cart)] = outer.reshape(-1, 3, 3).swapaxes(1, 2).reshape(-1,9)
+        #
+        # self._rot_tensor3 = np.zeros((len(rot_cart)*4, 27, 27), dtype='double') # 2 represents the possibility of inversion
+        # for i, rot in enumerate(rot_cart):
+        #     outer = np.kron(self._rot_tensor2[i], rot)
+        #     self._rot_tensor3[i] = outer
+        #     outer = outer.reshape(-1, 3, 3, 3)
+        #     self._rot_tensor3[i+len(rot_cart)] = outer.swapaxes(2, 3).reshape(-1,27)
+        #     self._rot_tensor3[i+2*len(rot_cart)] = outer.swapaxes(1, 3).reshape(-1,27)
+        #     self._rot_tensor3[i+3*len(rot_cart)] = outer.swapaxes(1, 2).reshape(-1,27)
+
 
 
 

@@ -1,7 +1,5 @@
 __author__ = 'xinjiang'
 import numpy as np
-from mdfc.fc2 import get_atom_sent_by_operation, get_atom_sent_by_site_sym,\
-    get_all_operations_at_star, get_rotations_at_star
 from mdfc.fcmath import gaussian_py, similarity_transformation, mat_dot_product, gaussian
 from itertools import permutations
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
@@ -23,7 +21,6 @@ def get_bond_symmetry(site_symmetry,
         diff = pos[atom_disp] - rot_pos
         if (abs(diff - diff.round()) < symprec).all():
             bond_sym.append(rot)
-
     return np.array(bond_sym)
 
 def get_irreducible_triplets_with_permute(triplets,
@@ -175,8 +172,7 @@ def get_fc3_spg_invariance(triplets,
                            num_rotations3,
                            mappings3,
                            lattice,
-                           symprec,
-                           is_disperse=False):
+                           symprec):
     "Find all spg symmetries that map the triplet to itself and thus the symmetry would act as constraints"
     triplets_dict = []
     iatoms1 = np.unique(mappings1)
@@ -252,25 +248,33 @@ def get_fc3_spg_invariance(triplets,
         triplets_dict.append(triplet_dict)
     num_irred = [len(dic['independent']) for dic in triplets_dict]
     ind_elements = np.hstack((dic['independent'] for dic in triplets_dict))
-    if is_disperse:
-        from scipy.sparse import coo_matrix
-        trans = []
-        for i, trip in enumerate(triplets_dict):
-            start = sum(num_irred[:i])
-            length = num_irred[i]
-            transform_tmp = np.zeros((27, sum(num_irred)), dtype="float")
-            transform_tmp[:, start:start + length] = trip['transform']
-            non_zero = np.where(np.abs(transform_tmp) > symprec)
-            transform_tmp_sparse = coo_matrix((transform_tmp[non_zero], non_zero), shape=transform_tmp.shape)
-            trans.append(transform_tmp_sparse)
-    else:
-        trans = np.zeros((len(triplets_dict), 27, sum(num_irred)), dtype="float")
-        for i, trip in enumerate(triplets_dict):
-            start = sum(num_irred[:i])
 
-            length = num_irred[i]
-            trans[i,:, start:start + length] = trip['transform']
-    return ind_elements, trans
+    transform = np.zeros((27, sum(num_irred)), dtype="float")
+    for i, trip in enumerate(triplets_dict):
+        start = sum(num_irred[:i])
+        length = num_irred[i]
+        transform[:, start:start + length] = trip['transform']
+    return ind_elements, transform
+
+    # if is_disperse:
+    #     from scipy.sparse import coo_matrix
+    #     trans = []
+    #     for i, trip in enumerate(triplets_dict):
+    #         start = sum(num_irred[:i])
+    #         length = num_irred[i]
+    #         transform_tmp = np.zeros((27, sum(num_irred)), dtype="float")
+    #         transform_tmp[:, start:start + length] = trip['transform']
+    #         non_zero = np.where(np.abs(transform_tmp) > symprec)
+    #         transform_tmp_sparse = coo_matrix((transform_tmp[non_zero], non_zero), shape=transform_tmp.shape)
+    #         trans.append(transform_tmp_sparse)
+    # else:
+    #     trans = np.zeros((len(triplets_dict), 27, sum(num_irred)), dtype="float")
+    #     for i, trip in enumerate(triplets_dict):
+    #         start = sum(num_irred[:i])
+    #
+    #         length = num_irred[i]
+    #         trans[i,:, start:start + length] = trip['transform']
+
 
 def get_fc3_translational_invariance(supercell,
                                      trans,
