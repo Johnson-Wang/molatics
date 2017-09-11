@@ -16,21 +16,18 @@ def get_fc2_coefficients(pairs, symmetry):
     return ifc_map, coeff
 
 def get_fc2_coefficient_single(pairs, symmetry, atom1=0, atom2=0):
-
-    nope = symmetry.mapping_operations[atom1]
-    rot1 = symmetry.rotations[nope]
-
-    atom1_ = symmetry.mapping[atom1]
-    atom2_ = symmetry.get_atom_sent_by_operation(atom2, nope)
-    atom2_, rot2 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom2_)
-    if (atom1_, atom2_) not in pairs:
-        ifc_map, coeff = get_fc2_coefficient_single(pairs, symmetry, atom2, atom1)
-        coeff += len(symmetry.pointgroup_operations)
-    else:
+    for i, (_atom1, _atom2) in enumerate(permutations([atom1, atom2])):
+        nope = symmetry.mapping_operations[atom1]
+        rot1 = symmetry.rotations[nope]
+        atom1_ = symmetry.mapping[atom1]
+        atom2_ = symmetry.get_atom_sent_by_operation(_atom2, nope)
+        atom2_, rot2 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom2_)
+        if (atom1_, atom2_) not in pairs:
+            continue
         ifc_map = pairs.index((atom1_, atom2_))
         rot = symmetry.rot_multiply(rot2, rot1)
-        coeff = symmetry.rot_inverse(rot)
-    return ifc_map, coeff
+        coeff = symmetry.rot_inverse(rot) + i * len(symmetry.pointgroup_operations)
+        return ifc_map, coeff
 
 def get_fc2_spg_invariance(pairs, symmetry):
     """Obtain the invariance under space group symmetries, i.e.
@@ -38,13 +35,12 @@ def get_fc2_spg_invariance(pairs, symmetry):
     where R is a rotational matrix, then components of Phi
     can be reduced using R by Gaussian elimination method
     """
-    indatoms1 = np.unique(symmetry.mapping)
     trans = []
     indeps = []
     for i,pair in enumerate(pairs):
-        CC = [np.zeros(9)]
         atom1, atom2 = pair
-        bond_symmetry = symmetry.get_bond_symmetry(atom1, atom2)
+        bond_symmetry = symmetry.get_site_symmetry_at_atoms([atom1, atom2])
+        invariant_transforms = symmetry.tensor2[bond_symmetry]
         # find all symmetries that keep the bond atom1-atom2 invariant
         ###############For permutations#######################
         rot = None
@@ -54,25 +50,15 @@ def get_fc2_spg_invariance(pairs, symmetry):
             rot1 = symmetry.rotations[nope]
             atom2_ = symmetry.get_atom_sent_by_operation(atom1, nope)
             atom2_, rot2 = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2_)
-            assert atom2_ == atom2
-            rot = symmetry.rot_multiply(rot2, rot1)
-        for rot2 in bond_symmetry:
-            rot = np.dot(rot2, rot1)
-
-            rot_cart = np.double(similarity_transformation(lattice, rot))
-            seq = "".join(["ik"[i] for i in permute])
-            PP  = np.einsum("ij,kl -> %sjl"%seq, rot_cart, rot_cart).reshape(9, 9).T
-            BB = PP - np.eye(9)
-            for i in np.arange(9):
-                is_found = False
-                if not (np.abs(BB[i]) < symprec).all():
-                    for j in np.arange(len(CC)):
-                        if (np.abs(BB[i] - CC[j]) < symprec).all():
-                            is_found = True
-                            break
-                    if not is_found:
-                        CC.append(BB[i])
-        CC, transform, independent = gaussian(np.array(CC))
+            if atom2_ == atom2:
+                rot = symmetry.rot_multiply(rot2, rot1)
+        if rot is not None:
+            bond_symmetry2 = [symmetry.rot_inverse(symmetry.rot_multiply(sym, rot))+len(symmetry.pointgroup_operations)
+                              for sym in bond_symmetry]
+            invariant_transforms = invariant_transforms.concatenate(symmetry.tensor2[bond_symmetry2])
+        invariant_transforms -= np.eye(9)
+        invariant_transforms = invariant_transforms.reshape(-1,9)
+        CC, transform, independent = gaussian(invariant_transforms)
         trans.append(transform)
         indeps.append(independent)
     return indeps, np.hstack(trans)

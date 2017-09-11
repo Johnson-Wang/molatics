@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import scipy
+from itertools import permutations
 from scipy.sparse import dok_matrix, coo_matrix, csr_matrix
 from fc2 import get_fc2_coefficients, get_fc2_spg_invariance,\
     get_fc2_translational_invariance, get_fc2_rotational_invariance, get_trim_fc2
@@ -493,48 +494,19 @@ class ForceConstants():
         symmetry = self._symmetry
         pairs = []
         for atom1 in np.unique(symmetry.mapping):
-            mapping2 = []
+            #atom1 ranges in the first irreducible atoms
             for atom2 in np.arange(self._num_atom):
-                mapatom, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2)
-                mapping2.append(mapatom)
-
-            for atom2 in np.unique(mapping2):
-                if symmetry.mapping[atom2] < atom1:
-                    continue
-                # symmetry.mapping[atom2] equals atom1
-                nope = symmetry.mapping_operations[atom2]
-                atom2_ = symmetry.get_atom_sent_by_operation(atom1, nope)
+                atom2_, map_ope = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2)
+                if atom2_ < atom2:
+                    continue #then this pair already exists.
+                if symmetry.mapping[atom2] != atom1:
+                    continue #this pair either exists or will be indexed later
+                atom2_ = symmetry.get_atom_sent_by_operation(atom1, symmetry.mapping_operations[atom2])
                 atom2_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2_)
                 if atom2_ < atom2:
                     continue
-                else:
-                    pairs.append((atom1, atom2))
+                pairs.append((atom1, atom2))
         self._pairs = pairs
-        # indep['noperations'] = np.array([len(site_sym) for site_sym in site_syms_list], dtype="intc")
-        # max_size = np.max(indep['noperations'])
-        # site_syms = np.zeros((self._ind1['natoms'], max_size, 3, 3), dtype=np.float)
-        # for i in range(self._ind1['natoms']):
-        #     site_syms[i,:indep['noperations'][i]] = np.array(site_syms_list[i])
-        # indep['rotations'] = site_syms
-        # indep['translations'] = None
-        # mappings = np.zeros((self._ind1['natoms'], self._num_atom), dtype="intc")
-        # mapping_operations = np.zeros((self._ind1['natoms'], self._num_atom), dtype="intc")
-        # for i, atom1 in enumerate(self._ind1['atoms']):
-        #     mappings[i], mapping_operations[i] = self._symmetry.get_atom_mapping_under_symmetries(
-        #         np.array(site_syms_list[i]), atom1)
-        # indep['mappings'] = mappings
-        # indep['mapping_operations'] = mapping_operations
-        # indep['natoms'] = np.array([len(np.unique(mappings[i])) for i in range(self._ind1['natoms'])], dtype="intc")
-        # ind_atom2 = np.zeros((self._ind1['natoms'], np.max(indep['natoms'])), dtype="intc")
-        # for i, atom1 in enumerate(self._ind1['atoms']):
-        #     ind_atom2[i, :indep['natoms'][i]] = np.unique(mappings[i])
-        # indep['atoms'] = ind_atom2
-        # self._ind2 = indep
-        # pairs = []
-        # for i, atom1 in enumerate(self._ind1['atoms']):
-        #     for j, atom2 in enumerate(self._ind2['atoms'][i, :self._ind2['natoms'][i]]):
-        #         pairs.append((atom1, atom2))
-        # self._pairs = pairs
 
     def set_pair_reduced_included(self, pair_inclusion=None):
         if pair_inclusion is None:
@@ -651,8 +623,6 @@ class ForceConstants():
         print "Under the system symmetry"
         print "Number of first independent atoms: %4d" % len(np.unique(equivalent_atoms))
         self.set_second_independents()
-        # print "Number of second independent atoms" + " %4d" * len(self._ind2['natoms']) % tuple(self._ind2['natoms'])
-        # self.get_irreducible_fc2s_with_permute()
         print "Number of irreducible pairs: %4d" %len(self._pairs)
 
         if (self._cutoff is not None) and (self._cutoff.get_cutoff_radius()is not None):
@@ -886,85 +856,44 @@ class ForceConstants():
 
     @timeit
     def set_third_independents(self):
-        symprec = self._symmetry.get_symmetry_tolerance()
-        positions = self._supercell.get_scaled_positions()
-        if self._ind1 == None:
-            self.set_first_independents()
-        ind1 = self._ind1
-        if self._ind2 == None:
-            self.set_second_independents()
-        ind2 = self._ind2
-        ind3 = {}
-        nind_atoms = np.zeros_like(ind2['atoms'])
-        ind_mappings = np.zeros(ind2['atoms'].shape + (self._num_atom,), dtype="intc")
-        ind_mapping_opes = np.zeros_like(ind_mappings)
-        all_bond_syms_list = []
-        for i, atom1 in enumerate(ind1['atoms']):
-            site_sym = ind2['rotations'][i]
-            bond_syms = []
-            for j, atom2 in enumerate(ind2['atoms'][i]):
-                reduced_bond_sym = get_bond_symmetry(
-                    site_sym,
-                    positions,
-                    atom1,
-                    atom2,
-                    symprec)
-                bond_syms.append(reduced_bond_sym)
-                atom_mappings, mapping_operations = self._symmetry.get_atom_mapping_under_sitesymmetry(atom2, reduced_bond_sym, positions, symprec, True)
-                ind_mappings[i,j] = atom_mappings
-                ind_mapping_opes[i,j] = mapping_operations
-                nind_atoms[i,j] = len(np.unique(atom_mappings))
-            all_bond_syms_list.append(bond_syms)
-        bond_sym_sizes = [[len(bond2) for bond2 in bond1] for bond1 in all_bond_syms_list]
-        max_bond_sym = np.max([np.max(bond) for bond in bond_sym_sizes])
-        all_bond_syms = np.zeros(ind2['atoms'].shape + (max_bond_sym, 3, 3), dtype="intc")
-        nsym = np.zeros(ind2['atoms'].shape, dtype="intc")
-        ind_atoms = np.zeros(ind2['atoms'].shape + (np.max(nind_atoms),), dtype="intc")
-        for i, atom1 in enumerate(ind1['atoms']):
-            for j, atom2 in enumerate(ind2['atoms'][i]):
-                length = bond_sym_sizes[i][j]
-                all_bond_syms[i,j, :length] = all_bond_syms_list[i][j]
-                nsym[i,j] = length
-                ind_atoms[i,j, :nind_atoms[i,j]] = np.unique(ind_mappings[i,j])
-        ind3['mappings'] = ind_mappings
-        ind3['mapping_operations'] = ind_mapping_opes
-        ind3['noperations'] = nsym
-        ind3['rotations'] = all_bond_syms
-        ind3['translations'] = None
-        ind3['atoms'] = ind_atoms
-        ind3['natoms'] = nind_atoms
-        self._ind3 = ind3
-        triplets = []
-        for i, atom1 in enumerate(self._ind1['atoms']):
-            for j, atom2 in enumerate(self._ind2['atoms'][i, :self._ind2['natoms'][i]]):
-                for k, atom3 in enumerate(self._ind3['atoms'][i, j, :self._ind3['natoms'][i,j]]):
-                    triplets.append((atom1, atom2, atom3))
-        self._triplets = triplets
+        symmetry = self._symmetry
+        self._triplets = []
+        for atom1 in np.unique(symmetry.mapping):
+            #atom1 ranges in the first irreducible atoms
+            for atom2 in np.arange(self._num_atom):
+                atom2_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2)
+                if atom2_ != atom2:
+                    continue #then this pair already exists.
+                bond_symmetry = symmetry.get_site_symmetry_at_atoms([atom1, atom2])
+                for atom3 in np.arange(self._num_atom):
+                    atom3_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom3, bond_symmetry)
+                    if atom3_ != atom3:
+                        continue
 
+                    #Use permutations to check if the triplet has equivalence in previous ones
+                    is_exist = False
+                    for _atom1, _atom2, _atom3 in list(permutations((atom1, atom2, atom3)))[1:]:
+                        atom1_ = symmetry.mapping[_atom1]
+                        nope = symmetry.mapping_operations[_atom1]
+                        if atom1_ < atom1:
+                            is_exist = True
+                            break
+                        elif atom1_ == atom1:
+                            atom2_ = symmetry.get_atom_sent_by_operation(_atom2, nope)
+                            atom2_, mapope = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2_)
+                            if atom2_ < atom2:
+                                is_exist = True
+                                break
+                            elif atom2_ == atom2:
+                                atom3_ = symmetry.get_atom_sent_by_operation(_atom3, nope)
+                                atom3_ = symmetry.get_atom_sent_by_site_sym(atom1, atom3_, mapope)
+                                atom3_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom3_)
+                                if atom3_ != atom3:
+                                    is_exist = True
+                                    break
+                    if not is_exist:
+                        self._triplets.append((atom1, atom2, atom3))
 
-    @timeit
-    def get_irreducible_fc3s_with_permute(self):
-        ind1 = self._ind1
-        ind2 = self._ind2
-        ind3 = self._ind3
-        self._triplet_mappings, self._triplet_transforms = \
-            get_irreducible_triplets_with_permute(self._triplets,
-                                                  self._positions,
-                                                  ind1['rotations'],
-                                                  ind1['translations'],
-                                                  ind1['mappings'],
-                                                  ind1['mapping_operations'],
-                                                  ind2['rotations'],
-                                                  ind2['noperations'],
-                                                  ind2['mappings'],
-                                                  ind2['mapping_operations'],
-                                                  ind3['rotations'],
-                                                  ind3['noperations'],
-                                                  ind3['mappings'],
-                                                  ind3['mapping_operations'],
-                                                  self._lattice,
-                                                  self._symprec)
-        self._triplets_reduced = [self._triplets[t] for t in np.unique(self._triplet_mappings)]
 
     @timeit
     def get_fc3_coefficients(self, lang="C"):
@@ -1095,7 +1024,7 @@ class ForceConstants():
         self._fc3_eye_mappings = fc3_eye_mappings
 
     @timeit
-    def get_irreducible_fc3_components_with_spg(self, lang="C", is_md = False):
+    def get_irreducible_fc3_components_with_spg(self, lang="py", is_md = False):
         ind1 = self._ind1
         ind2 = self._ind2
         ind3 = self._ind3
@@ -1103,19 +1032,7 @@ class ForceConstants():
             lang = "py"
         if lang == "py":
             ifc3_ele, ifc3_trans = \
-                get_fc3_spg_invariance(self._triplets_reduced,
-                                       self._positions,
-                                       ind1['rotations'],
-                                       ind1['translations'],
-                                       ind1['mappings'],
-                                       ind2['rotations'],
-                                       ind2['noperations'],
-                                       ind2['mappings'],
-                                       ind3['rotations'],
-                                       ind3['noperations'],
-                                       ind3['mappings'],
-                                       self._lattice,
-                                       self._symprec)
+                get_fc3_spg_invariance(self._triplets, self._symmetry)
 
         else:
             import _mdfc

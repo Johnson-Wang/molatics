@@ -3,6 +3,10 @@ import spglib
 from phonopy.structure.cells import Primitive
 from itertools import permutations
 from mdfc.fcmath import similarity_transformation
+
+def get_index_of_atom_():
+    pass
+
 class Symmetry():
     def __init__(self, cell, symprec=1e-6):
         self.cell = cell
@@ -179,7 +183,7 @@ class Symmetry():
         atom2 = np.where(np.all(np.abs(diff - np.rint(diff)) < self.symprec, axis=1))[0][0]
         return atom2
 
-    def get_atom_sent_by_site_sym(self, atom, center, nrot):
+    def get_atom_sent_by_site_sym(self, center, atom, nrot):
         if nrot == 0:
             return atom
         rot = self.pointgroup_operations[nrot]

@@ -318,9 +318,7 @@ class MolecularDynamicsForceConstant:
     def set_fc3_irreducible_components(self, is_md=False):
         fc = self._fc
         fc.set_third_independents()
-        print "Number of 3rd IFC: %d" %(27 * len(fc._triplets))
-        fc.get_irreducible_fc3s_with_permute()
-        print "Permutation reduces 3rd IFC to %d"%(27 * len(fc._triplets_reduced))
+        print "Number of irreduble triplets: %d" %len(fc._triplets)
         fc.get_irreducible_fc3_components_with_spg(is_md=is_md)
         print "spg invariance reduces 3rd IFC to %d"%(len(fc._ifc3_ele))
         print "Calculating fc3 coefficient..."
