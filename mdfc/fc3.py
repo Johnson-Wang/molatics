@@ -3,6 +3,7 @@ import numpy as np
 from mdfc.fcmath import gaussian_py, similarity_transformation, mat_dot_product, gaussian
 from itertools import permutations
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
+from fc2 import get_index_of_atom
 
 def get_bond_symmetry(site_symmetry,
                       positions,
@@ -53,13 +54,13 @@ def get_fc3_coefficients(triplets, symmetry): # returning the fc3 coefficients a
             continue
         atom1_ = s2u_map[atom1]
         disp = positions[atom1] - positions[atom1_]
-        for atom2 in np.arange(natom):
+        for atom2, atom3 in np.ndindex((natom, natom)):
             pos_atom2 = positions[atom2] - disp
-            diff = pos_atom2 - positions
-            diff -= np.rint(diff)
-            jp = np.where(np.all(np.abs(diff) < symmetry.symprec, axis=-1))[0][0]
-            fc2[atom1, atom2] = fc2[ip, jp]
-
+            atom2_ = get_index_of_atom(pos_atom2, positions, symmetry.symprec)
+            pos_atom3 = positions[atom3] - disp
+            atom3_ = get_index_of_atom(pos_atom3, positions, symmetry.symprec)
+            ifc_map[atom1, atom2, atom3] = ifc_map[atom1_, atom2_, atom3_]
+            coefficients[atom1, atom2, atom3] = coefficients[atom1_, atom2_, atom3_]
     return coefficients, ifc_map
 
 

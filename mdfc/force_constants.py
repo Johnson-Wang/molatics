@@ -4,9 +4,9 @@ import scipy
 from itertools import permutations
 from scipy.sparse import dok_matrix, coo_matrix, csr_matrix
 from fc2 import get_fc2_coefficients, get_fc2_spg_invariance,\
-    get_fc2_translational_invariance, get_fc2_rotational_invariance, get_trim_fc2
+    get_fc2_translational_invariance, get_fc2_rotational_invariance, get_trim_fc2, get_index_of_atom
 
-from fc3 import get_bond_symmetry, get_irreducible_triplets_with_permute, get_fc3_coefficients, get_fc3_spg_invariance,\
+from fc3 import get_fc3_coefficients, get_fc3_spg_invariance,\
     get_fc3_translational_invariance, get_fc3_rotational_invariance, get_trim_fc3
 from file_IO import read_fc2_from_hdf5, read_fc3_from_hdf5, write_fc2_hdf5, write_fc3_hdf5
 from fcmath import mat_dot_product, mat_dense_to_sparse
@@ -540,9 +540,8 @@ class ForceConstants():
         self._ifc2_map, self._coeff2 = get_fc2_coefficients(self._pairs, self._symmetry)
 
     def get_irreducible_fc2_components_with_spg(self, is_md=False):
-        ind1 = self._ind1
-        ind2 = self._ind2
-        get_rot = lambda rot_index: self._symmetry.pointgroup_operations(rot_index).copy()
+        if self._symmetry.tensor2 is None:
+            self._symmetry.set_tensor2()
         ifc2_ele, ifc2_trans = \
             get_fc2_spg_invariance(self._pairs,
                                    self._symmetry)
@@ -618,7 +617,6 @@ class ForceConstants():
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='trimming')
 
     def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False, is_md=False):
-        # self.set_first_independents()
         equivalent_atoms = self._symmetry.mapping
         print "Under the system symmetry"
         print "Number of first independent atoms: %4d" % len(np.unique(equivalent_atoms))
@@ -632,12 +630,14 @@ class ForceConstants():
                   %(len(self._pairs), np.sum(self._pairs_included))
         else:
             self.set_pair_reduced_included()
+        print "Number of independent fc2 components: %d" % (len(self._pairs) * 9)
 
+        self.get_irreducible_fc2_components_with_spg(is_md)
+        print "Point group invariance reduces independent fc2 components to %d" % (self._ifc2_trans.shape[-1])
         print "Calculating transformation coefficients..."
         self.get_fc2_coefficients()
-        print "Number of independent fc2 components: %d" %(len(self._pairs)*9)
-        self.get_irreducible_fc2_components_with_spg(is_md)
-        print "Point group invariance reduces independent fc2 components to %d" %(self._ifc2_trans.shape[1])
+
+
         sys.stdout.flush()
         if not is_md:
             if is_trans_inv:
@@ -869,7 +869,6 @@ class ForceConstants():
                     atom3_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom3, bond_symmetry)
                     if atom3_ != atom3:
                         continue
-
                     #Use permutations to check if the triplet has equivalence in previous ones
                     is_exist = False
                     for _atom1, _atom2, _atom3 in list(permutations((atom1, atom2, atom3)))[1:]:
@@ -896,53 +895,10 @@ class ForceConstants():
 
 
     @timeit
-    def get_fc3_coefficients(self, lang="C"):
-        ind1 = self._ind1
-        ind2 = self._ind2
-        ind3 = self._ind3
-        first_atoms = np.unique(self._supercell.get_supercell_to_unitcell_map()).astype('intc')
-        if lang=="py":
-            self._coeff3, self._ifc3_map =\
-                get_fc3_coefficients(self._triplets,
-                                     self._triplet_mappings,
-                                     self._triplet_transforms,
-                                     self._lattice,
-                                     self._positions,
-                                     ind1['rotations'],
-                                     ind1['translations'],
-                                     ind1['mappings'],
-                                     ind1['mapping_operations'],
-                                     ind2['rotations'],
-                                     ind2['mappings'],
-                                     ind2['mapping_operations'],
-                                     ind3['rotations'],
-                                     ind3['mappings'],
-                                     ind3['mapping_operations'],
-                                     first_atoms,
-                                     self._symprec)
-        else:
-            import _mdfc
-            self._coeff3 = np.zeros((len(first_atoms), self._num_atom, self._num_atom, 27, 27), dtype="double")
-            self._ifc3_map = np.zeros((len(first_atoms), self._num_atom, self._num_atom), dtype="intc")
-            _mdfc.get_fc3_coefficients(self._coeff3,
-                                         self._ifc3_map,
-                                         first_atoms,
-                                         np.array(self._triplets).astype("intc"),
-                                         self._triplet_mappings.copy().astype("intc"),
-                                         self._triplet_transforms.copy().astype("double"),
-                                         self._lattice.copy().astype("double"),
-                                         self._positions.copy().astype("double"),
-                                         ind1['rotations'].astype("intc"),
-                                         ind1['translations'].astype("double"),
-                                         ind1['mappings'].astype("intc"),
-                                         ind1['mapping_operations'].astype("intc"),
-                                         ind2['rotations'].astype("intc"),
-                                         ind2['mappings'].astype("intc"),
-                                         ind2['mapping_operations'].astype("intc"),
-                                         ind3['rotations'].astype("intc"),
-                                         ind3['mappings'].astype("intc"),
-                                         ind3['mapping_operations'].astype("intc"),
-                                         self._symprec)
+    def get_fc3_coefficients(self):
+        self._coeff3, self._ifc3_map =\
+            get_fc3_coefficients(self._triplets,
+                                 self._symmetry)
 
     @timeit
     def distribute_fc3(self):
@@ -951,7 +907,7 @@ class ForceConstants():
         trans = self._ifc3_trans
         assert self._fc3_irred is not None
         s2u_map = self._supercell.get_supercell_to_unitcell_map()
-        scaled_positions = self._supercell.get_scaled_positions()
+        positions = self._supercell.get_scaled_positions()
         # distribute all the fc3s
         print "Distributing fc3..."
         fc3 = np.zeros((self._num_atom, self._num_atom, self._num_atom, 3,3,3), dtype="double")
@@ -964,15 +920,15 @@ class ForceConstants():
         for atom1 in range(self._num_atom):
             if atom1 in s2u_map:
                 continue
-            ip = s2u_map[atom1]
-            l = scaled_positions[atom1] - scaled_positions[ip]
+            atom1_ = s2u_map[atom1]
+            disp = positions[atom1] - positions[atom1_]
             for atom2 in range(self._num_atom):
-                disp2 = scaled_positions[atom2] - l - scaled_positions
-                jp = np.where(np.all(np.abs(disp2 - np.rint(disp2)) < self._symprec, axis=-1))[0][0]
+                pos_atom2 = positions[atom2] - disp
+                atom2_ = get_index_of_atom(pos_atom2, positions, self._symprec)
                 for atom3 in range(self._num_atom):
-                    disp3 = scaled_positions[atom3] - l - scaled_positions
-                    kp = np.where(np.all(np.abs(disp3 - np.rint(disp3)) < self._symprec, axis=-1))[0][0]
-                    fc3[atom1, atom2, atom3] = fc3[ip, jp, kp]
+                    pos_atom3 = positions[atom3] - disp
+                    atom3_ = get_index_of_atom(pos_atom3, positions, self._symprec)
+                    fc3[atom1, atom2, atom3] = fc3[atom1_, atom2_, atom3_]
         self._fc3 = fc3
 
     @timeit

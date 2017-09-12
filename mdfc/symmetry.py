@@ -4,8 +4,6 @@ from phonopy.structure.cells import Primitive
 from itertools import permutations
 from mdfc.fcmath import similarity_transformation
 
-def get_index_of_atom_():
-    pass
 
 class Symmetry():
     def __init__(self, cell, symprec=1e-6):
@@ -138,12 +136,12 @@ class Symmetry():
             diff = np.array([np.dot(rotations, pos[atom]) - pos[atom] for atom in atoms]) # shape[natoms, nsym, 3]
             diff -= np.rint(diff)
             indices = np.where(np.all(np.abs(diff) < self.symprec, axis=(0,2))) # over natoms and direction
-            return symmetries[indices]
+            return np.intc(symmetries)[indices]
         else: # atoms is an integer
             return self.get_site_symmetry(atoms)
 
     def set_tensor2(self):
-        lattice = self.cell.get_lattice().T
+        lattice = self.cell.get_cell().T
         self.tensor2 = np.zeros((len(self.pointgroup_operations)*2, 9, 9), dtype='double')
         nopes = len(self.pointgroup_operations)
         for i, rot in enumerate(self.pointgroup_operations):

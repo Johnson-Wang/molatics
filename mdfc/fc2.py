@@ -7,12 +7,38 @@ from mdfc.symmetry import Symmetry
 from mdfc.fcmath import similarity_transformation, gaussian, mat_dot_product
 from realmd.memory_profiler import profile
 
+
+def get_index_of_atom(pos_atom, positions, symprec=1e-6):
+    diff = pos_atom - positions
+    diff -= np.rint(diff)
+    where,  = np.where(np.all(np.abs(diff) < symprec, axis=-1))
+    if len(where) == 0:
+        return
+    return where[0]
+
 def get_fc2_coefficients(pairs, symmetry):
     natom = len(symmetry.positions)
+    positions = symmetry.positions
+    s2u_map = symmetry.cell.get_supercell_to_unitcell_map()
     coeff = np.zeros((natom, natom), dtype="intc")
     ifc_map = np.zeros((natom, natom), dtype="intc")
+    #Consider atom1 in the first unit-cell
+    first_cell = np.unique(s2u_map)
     for atom1, atom2 in np.ndindex((natom, natom)):
+        if atom1 not in first_cell:
+            continue
         ifc_map[atom1, atom2], coeff[atom1, atom2] = get_fc2_coefficient_single(pairs, symmetry, atom1, atom2)
+    #Other pairs can be directly mapped using translational symmetry
+    for atom1, atom2 in np.ndindex((natom, natom)):
+        if atom1 in first_cell:
+            continue
+        atom1_ = s2u_map[atom1]
+        disp = positions[atom1] - positions[atom1_]
+        for atom2 in np.arange(natom):
+            pos_atom2 = positions[atom2] - disp
+            atom2_ = get_index_of_atom(pos_atom2, positions, symmetry.symprec)
+            ifc_map[atom1, atom2] = ifc_map[atom1_, atom2_]
+            coeff[atom1, atom2] = coeff[atom1_, atom2_]
     return ifc_map, coeff
 
 def get_fc2_coefficient_single(pairs, symmetry, atom1=0, atom2=0):
@@ -37,6 +63,7 @@ def get_fc2_spg_invariance(pairs, symmetry):
     """
     trans = []
     indeps = []
+    npgope = len(symmetry.pointgroup_operations)
     for i,pair in enumerate(pairs):
         atom1, atom2 = pair
         bond_symmetry = symmetry.get_site_symmetry_at_atoms([atom1, atom2])
@@ -53,9 +80,11 @@ def get_fc2_spg_invariance(pairs, symmetry):
             if atom2_ == atom2:
                 rot = symmetry.rot_multiply(rot2, rot1)
         if rot is not None:
-            bond_symmetry2 = [symmetry.rot_inverse(symmetry.rot_multiply(sym, rot))+len(symmetry.pointgroup_operations)
+            bond_symmetry2 = [symmetry.rot_multiply(sym, rot)+npgope
                               for sym in bond_symmetry]
-            invariant_transforms = invariant_transforms.concatenate(symmetry.tensor2[bond_symmetry2])
+            #R.P.12 = 12, where P is a permutation matrix and R is a rotational matrix
+            invariant_transforms =\
+                np.concatenate((invariant_transforms, symmetry.tensor2[bond_symmetry2]), axis=0)
         invariant_transforms -= np.eye(9)
         invariant_transforms = invariant_transforms.reshape(-1,9)
         CC, transform, independent = gaussian(invariant_transforms)
