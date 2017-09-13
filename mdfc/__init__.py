@@ -316,6 +316,8 @@ class MolecularDynamicsForceConstant:
 
     #@profile
     def set_fc3_irreducible_components(self, is_md=False):
+        if self._symmetry.tensor3 is None:
+            self._symmetry.set_tensor3()
         fc = self._fc
         fc.set_third_independents()
         print "Number of irreduble triplets: %d" %len(fc._triplets)

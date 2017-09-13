@@ -3,7 +3,7 @@ import numpy as np
 from mdfc.fcmath import gaussian_py, similarity_transformation, mat_dot_product, gaussian
 from itertools import permutations
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
-from fc2 import get_index_of_atom
+from fc2 import get_index_of_atom, get_indices_of_atoms
 
 def get_bond_symmetry(site_symmetry,
                       positions,
@@ -30,37 +30,52 @@ def get_fc3_coefficients(triplets, symmetry): # returning the fc3 coefficients a
     coefficients = np.zeros((natom, natom, natom), dtype='intc')
     ifc_map = np.zeros_like(coefficients)
     s2u_map = symmetry.cell.get_supercell_to_unitcell_map()
-    for triplet in np.ndindex(natom, natom, natom):
-        if triplet[0] not in np.unique(s2u_map):
-            continue
-        for i, (atom1, atom2, atom3) in enumerate(permutations(triplet)):
-            atom1_ = symmetry.mapping[atom1]
-            nope = symmetry.mapping_operations[atom1]
-            rot1 = symmetry.rotations[nope]
-            atom2_ = symmetry.get_atom_sent_by_operation(atom2, nope)
-            atom2_, rot2 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom2_)
-            atom3_ = symmetry.get_atom_sent_by_operation(atom3, nope)
-            atom3_ = symmetry.get_atom_sent_by_site_sym(atom1_, atom3_, rot2)
-            bond_symmetry2 = symmetry.get_site_symmetry_at_atoms([atom1_, atom2_])
-            atom3_, rot3 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom3_, bond_symmetry2)
-            if (atom1_, atom2_, atom3_) in triplets:
-                rot = symmetry.rot_inverse(symmetry.rot_multiply(rot3, symmetry.rot_multiply(rot2, rot1)))
-                coefficients[tuple(triplet)] =\
-                    symmetry.tensor3[rot + i * len(symmetry.pointgroup_operations)]
-                ifc_map[tuple(triplet)] = triplets.index(triplet)
+    unique = np.unique(s2u_map)
+    
+    for atom1 in unique:
+        for atom2, atom3 in np.ndindex((natom, natom)):
+            is_found = False
+            for i, (_atom1, _atom2, _atom3) in enumerate(permutations((atom1, atom2, atom3))):
+                atom1_ = symmetry.mapping[_atom1] # the first irreducible atom
+                nope = symmetry.mapping_operations[_atom1]
+                rot1 = symmetry.rotations[nope] # the first rotation
+                atom2_ = symmetry.get_atom_sent_by_operation(_atom2, nope) #second atom should move with the first one
+                atom2_, rot2 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom2_) # the second irreducible atom
+                atom3_ = symmetry.get_atom_sent_by_operation(_atom3, nope) # the third atom should move with the first one
+                atom3_ = symmetry.get_atom_sent_by_site_sym(atom1_, atom3_, rot2) # the third atom should move with the second one
+                bond_symmetry2 = symmetry.get_site_symmetry_at_atoms([atom1_, atom2_])
+                atom3_, rot3 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom3_, bond_symmetry2) # the third irreducible atom
+                if (atom1_, atom2_, atom3_) in triplets:
+                    rot = symmetry.rot_multiply(rot3, symmetry.rot_multiply(rot2, rot1)) # rot = rot3.rot2.rot1
+                    coefficients[atom1, atom2, atom3] =\
+                        rot + i * len(symmetry.pointgroup_operations)
+                    # Be reminded that this coefficient maps from the reducible triplet to the irreducible one
+                    # The reverse process should use coeff.T
+                    ifc_map[atom1, atom2, atom3] = triplets.index((atom1_, atom2_, atom3_))
+                    is_found = True
+                    break
+            assert is_found
 
+
+
+    #First atoms in peripheral cells are considered here
     for atom1 in np.arange(natom):
-        if atom1 in np.unique(s2u_map):
+        if atom1 in unique:
             continue
         atom1_ = s2u_map[atom1]
         disp = positions[atom1] - positions[atom1_]
-        for atom2, atom3 in np.ndindex((natom, natom)):
-            pos_atom2 = positions[atom2] - disp
-            atom2_ = get_index_of_atom(pos_atom2, positions, symmetry.symprec)
-            pos_atom3 = positions[atom3] - disp
-            atom3_ = get_index_of_atom(pos_atom3, positions, symmetry.symprec)
-            ifc_map[atom1, atom2, atom3] = ifc_map[atom1_, atom2_, atom3_]
-            coefficients[atom1, atom2, atom3] = coefficients[atom1_, atom2_, atom3_]
+        pos_atom2 = positions - disp  # shape:[natom, 3]
+        atom2_ = get_indices_of_atoms(pos_atom2, positions, symmetry.symprec)
+        atom3_ = atom2_
+        ifc_map[atom1, :, :] = ifc_map[atom1_, atom2_, atom3_]
+        coefficients[atom1, :, :] = coefficients[atom1_, atom2_, atom3_]
+        # for atom2, atom3 in np.ndindex((natom, natom)):
+        #     pos_atom2 = positions[atom2] - disp
+        #     atom2_ = get_index_of_atom(pos_atom2, positions, symmetry.symprec)
+        #     pos_atom3 = positions[atom3] - disp
+        #     atom3_ = get_index_of_atom(pos_atom3, positions, symmetry.symprec)
+        #     ifc_map[atom1, atom2, atom3] = ifc_map[atom1_, atom2_, atom3_]
+        #     coefficients[atom1, atom2, atom3] = coefficients[atom1_, atom2_, atom3_]
     return coefficients, ifc_map
 
 
@@ -71,8 +86,8 @@ def get_fc3_spg_invariance(triplets,
     independents = []
     transforms = []
     for itriplet, triplet in enumerate(triplets):
-        CC = [np.zeros(27)]
-        bond_symmetry = symmetry.get_site_symmetry_at_atoms(triplet)
+        bond_symmetry = symmetry.get_site_symmetry_at_atoms(triplet[:2])
+        triplet_symmetry = symmetry.get_site_symmetry_at_atoms(triplet)
         invariant_transforms = []
         for i, (atom1, atom2, atom3) in enumerate(permutations(triplet)): # Leave out the original triplet
             atom1_ = symmetry.mapping[atom1]
@@ -86,49 +101,20 @@ def get_fc3_spg_invariance(triplets,
                 continue
             atom3_ = symmetry.get_atom_sent_by_operation(atom3, nope)
             atom3_ = symmetry.get_atom_sent_by_site_sym(atom1_, atom3_, rot2)
-            bond_symmetry2 = symmetry.get_site_symmetry_at_atoms([atom1_, atom2_])
-            atom3_, rot3 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom3_, bond_symmetry2)
+            atom3_, rot3 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom3_, bond_symmetry)
             if not atom3_ == triplet[2]:
                 continue
-            rot = symmetry.rot_inverse(symmetry.rot_multiply(rot3, symmetry.rot_multiply(rot2, rot1)))
-            invariant_transforms.append(symmetry.tensor3[rot+i*len(symmetry.pointgroup_operations)])
+            rot = symmetry.rot_multiply(rot3, symmetry.rot_multiply(rot2, rot1))
+            # rot = rot3.rot2.rot1, the invariance says: rot.P(123) = 123
+            rots = [symmetry.rot_multiply(rot, r) + i * len(symmetry.pointgroup_operations) for r in triplet_symmetry]
+            invariant_transforms.append(symmetry.tensor3[rots])
         invariant_transforms = np.concatenate(invariant_transforms, axis=0)
         invariant_transforms = invariant_transforms - np.eye(27)
-        for trans in invariant_transforms:
-            is_found = False
-            if not (np.abs(trans) < symmetry.symprec).all():
-                row = trans / np.abs(trans).max()
-                for j in np.arange(len(CC)):
-                    if (np.abs(row - CC[j]) < symmetry.symprec).all():
-                        is_found = True
-                        break
-                if not is_found:
-                    CC.append(row)
-        DD = np.array(CC, dtype='double')
-        CC, transform, independent = gaussian(DD)
+        invariant_transforms = invariant_transforms.reshape(-1, 27)
+        CC, transform, independent = gaussian(invariant_transforms)
         independents.append(independent)
         transforms.append(transform)
-    return independents, np.concatenate(transforms, axis=0)
-
-    # if is_disperse:
-    #     from scipy.sparse import coo_matrix
-    #     trans = []
-    #     for i, trip in enumerate(triplets_dict):
-    #         start = sum(num_irred[:i])
-    #         length = num_irred[i]
-    #         transform_tmp = np.zeros((27, sum(num_irred)), dtype="float")
-    #         transform_tmp[:, start:start + length] = trip['transform']
-    #         non_zero = np.where(np.abs(transform_tmp) > symprec)
-    #         transform_tmp_sparse = coo_matrix((transform_tmp[non_zero], non_zero), shape=transform_tmp.shape)
-    #         trans.append(transform_tmp_sparse)
-    # else:
-    #     trans = np.zeros((len(triplets_dict), 27, sum(num_irred)), dtype="float")
-    #     for i, trip in enumerate(triplets_dict):
-    #         start = sum(num_irred[:i])
-    #
-    #         length = num_irred[i]
-    #         trans[i,:, start:start + length] = trip['transform']
-
+    return independents, np.hstack(transforms)
 
 def get_fc3_translational_invariance(supercell,
                                      trans,

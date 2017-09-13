@@ -16,6 +16,13 @@ def get_index_of_atom(pos_atom, positions, symprec=1e-6):
         return
     return where[0]
 
+def get_indices_of_atoms(pos_atoms, positions, symprec=1e-6):
+    diff = pos_atoms[:, np.newaxis, :] - positions[np.newaxis, :, :] # shape[natom_pos, natom, 3]
+    diff -= np.rint(diff)
+    _, where = np.where(np.all(np.abs(diff) < symprec, axis=-1)) # shape: natom_pos
+    assert len(where) == len(pos_atoms)
+    return where
+
 def get_fc2_coefficients(pairs, symmetry):
     natom = len(symmetry.positions)
     positions = symmetry.positions
@@ -29,30 +36,29 @@ def get_fc2_coefficients(pairs, symmetry):
             continue
         ifc_map[atom1, atom2], coeff[atom1, atom2] = get_fc2_coefficient_single(pairs, symmetry, atom1, atom2)
     #Other pairs can be directly mapped using translational symmetry
-    for atom1, atom2 in np.ndindex((natom, natom)):
+    for atom1 in np.arange(natom):
         if atom1 in first_cell:
             continue
         atom1_ = s2u_map[atom1]
         disp = positions[atom1] - positions[atom1_]
-        for atom2 in np.arange(natom):
-            pos_atom2 = positions[atom2] - disp
-            atom2_ = get_index_of_atom(pos_atom2, positions, symmetry.symprec)
-            ifc_map[atom1, atom2] = ifc_map[atom1_, atom2_]
-            coeff[atom1, atom2] = coeff[atom1_, atom2_]
+        pos_atom2 = positions - disp # shape:[natom, 3]
+        atom2_ = get_indices_of_atoms(pos_atom2, positions, symmetry.symprec)
+        ifc_map[atom1, :] = ifc_map[atom1_, atom2_]
+        coeff[atom1, :] = coeff[atom1_, atom2_]
     return ifc_map, coeff
 
 def get_fc2_coefficient_single(pairs, symmetry, atom1=0, atom2=0):
     for i, (_atom1, _atom2) in enumerate(permutations([atom1, atom2])):
         nope = symmetry.mapping_operations[atom1]
         rot1 = symmetry.rotations[nope]
-        atom1_ = symmetry.mapping[atom1]
-        atom2_ = symmetry.get_atom_sent_by_operation(_atom2, nope)
-        atom2_, rot2 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom2_)
+        atom1_ = symmetry.mapping[atom1] # first irreducible atom
+        atom2_ = symmetry.get_atom_sent_by_operation(_atom2, nope) # second atom should move with the first one
+        atom2_, rot2 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom2_) # second irreducible atom
         if (atom1_, atom2_) not in pairs:
-            continue
+            continue # move to the transposed pair
         ifc_map = pairs.index((atom1_, atom2_))
-        rot = symmetry.rot_multiply(rot2, rot1)
-        coeff = symmetry.rot_inverse(rot) + i * len(symmetry.pointgroup_operations)
+        rot = symmetry.rot_multiply(rot2, rot1) # rot=rot2.rot1
+        coeff = rot + i * len(symmetry.pointgroup_operations)
         return ifc_map, coeff
 
 def get_fc2_spg_invariance(pairs, symmetry):
@@ -70,7 +76,6 @@ def get_fc2_spg_invariance(pairs, symmetry):
         invariant_transforms = symmetry.tensor2[bond_symmetry]
         # find all symmetries that keep the bond atom1-atom2 invariant
         ###############For permutations#######################
-        rot = None
         if symmetry.mapping[atom2] == atom1:
             # this requires the bond atom2-atom1 can be mapped to atom1-atom2
             nope = symmetry.mapping_operations[atom2] #the index of operations that sent atom2 to atom1
@@ -79,12 +84,11 @@ def get_fc2_spg_invariance(pairs, symmetry):
             atom2_, rot2 = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2_)
             if atom2_ == atom2:
                 rot = symmetry.rot_multiply(rot2, rot1)
-        if rot is not None:
-            bond_symmetry2 = [symmetry.rot_multiply(sym, rot)+npgope
-                              for sym in bond_symmetry]
-            #R.P.12 = 12, where P is a permutation matrix and R is a rotational matrix
-            invariant_transforms =\
-                np.concatenate((invariant_transforms, symmetry.tensor2[bond_symmetry2]), axis=0)
+                bond_symmetry2 = [symmetry.rot_multiply(sym, rot)+npgope
+                                  for sym in bond_symmetry]
+                #R.P.12 = 12, where P is a permutation matrix and R is a rotational matrix
+                invariant_transforms =\
+                    np.concatenate((invariant_transforms, symmetry.tensor2[bond_symmetry2]), axis=0)
         invariant_transforms -= np.eye(9)
         invariant_transforms = invariant_transforms.reshape(-1,9)
         CC, transform, independent = gaussian(invariant_transforms)

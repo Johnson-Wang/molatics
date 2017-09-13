@@ -96,7 +96,7 @@ class ForceConstants():
         self._pairs_reduced = None
         self._pairs_included = None
         self._triplets_included = None
-        self._triplets_reduced = None
+        self._triplets = None
         self._fc2 = None
         self._fc2_read = None
         self._fc3_read = None
@@ -515,26 +515,8 @@ class ForceConstants():
 
     def set_triplet_reduced_included(self, triplet_inclusion=None):
         if triplet_inclusion is None:
-            triplet_inclusion = np.ones(len(self._triplets_reduced), dtype=bool)
+            triplet_inclusion = np.ones(len(self._triplets), dtype=bool)
         self._triplets_included = triplet_inclusion
-
-    def get_irreducible_fc2s_with_permute(self):
-        ind1 = self._ind1
-        ind2 = self._ind2
-        self._pair_mappings, self._pair_transforms = \
-            get_pairs_with_permute(self._pairs,
-                                   self._supercell.get_cell().T,
-                                   self._supercell.get_scaled_positions(),
-                                   ind1['rotations'],
-                                   ind1['translations'],
-                                   ind1['atoms'],
-                                   ind1['mappings'],
-                                   ind1['mapping_operations'],
-                                   ind2['rotations'],
-                                   ind2['mappings'],
-                                   ind2['mapping_operations'])
-
-        self._pairs_reduced = [self._pairs[i] for i in np.unique(self._pair_mappings)]
 
     def get_fc2_coefficients(self):
         self._ifc2_map, self._coeff2 = get_fc2_coefficients(self._pairs, self._symmetry)
@@ -617,6 +599,8 @@ class ForceConstants():
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='trimming')
 
     def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False, is_md=False):
+        if self._symmetry.tensor2 is None:
+            self._symmetry.set_tensor2()
         equivalent_atoms = self._symmetry.mapping
         print "Under the system symmetry"
         print "Number of first independent atoms: %4d" % len(np.unique(equivalent_atoms))
@@ -826,21 +810,22 @@ class ForceConstants():
     #     write_fc3_hdf5(self._fc3, filename='fc3-tuned.hdf5')
 
     def set_fc3_irreducible_components(self, is_trans_inv = False, is_rot_inv = False):
+        if self._symmetry.tensor3 is None:
+            self._symmetry.set_tensor3()
         self.set_third_independents()
-        print "Number of 3rd IFC: %d" %(27 * len(self._triplets))
-        self.get_irreducible_fc3s_with_permute()
-        print "Permutation reduces 3rd IFC to %d"%(27 * len(self._triplets_reduced))
+        print "Number of irreducible triplets found: %d" %(len(self._triplets))
         if (self._cutoff is not None) and (self._cutoff.get_cutoff_radius() is not None):
-            triplets_inclusion = self._cutoff.get_triplet_inclusion(triplets=self._triplets_reduced)
+            triplets_inclusion = self._cutoff.get_triplet_inclusion(triplets=self._triplets)
             self.set_triplet_reduced_included(triplets_inclusion)
             print "The artificial cutoff reduces number of irreducible pairs from %4d to %4d"\
-                  %(len(self._triplets_reduced), np.sum(self._triplets_included))
+                  %(len(self._triplets), np.sum(self._triplets_included))
         else:
             self.set_triplet_reduced_included()
+        self.get_irreducible_fc3_components_with_spg()
+        print "spg invariance reduces 3rd IFC to %d" % (len(self._ifc3_ele))
         print "Calculating fc3 coefficient..."
         self.get_fc3_coefficients()
-        self.get_irreducible_fc3_components_with_spg()
-        print "spg invariance reduces 3rd IFC to %d"%(len(self._ifc3_ele))
+
         if not np.all(self._triplets_included):
             self.set_trim_fc3()
             print "Interaction distance cutoff reduces independent fc3 components to %d" %len(self._ifc3_ele)
@@ -886,8 +871,8 @@ class ForceConstants():
                             elif atom2_ == atom2:
                                 atom3_ = symmetry.get_atom_sent_by_operation(_atom3, nope)
                                 atom3_ = symmetry.get_atom_sent_by_site_sym(atom1, atom3_, mapope)
-                                atom3_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom3_)
-                                if atom3_ != atom3:
+                                atom3_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom3_, bond_symmetry)
+                                if atom3_ < atom3:
                                     is_exist = True
                                     break
                     if not is_exist:
@@ -981,45 +966,18 @@ class ForceConstants():
 
     @timeit
     def get_irreducible_fc3_components_with_spg(self, lang="py", is_md = False):
-        ind1 = self._ind1
-        ind2 = self._ind2
-        ind3 = self._ind3
-        if self._is_disperse:
-            lang = "py"
-        if lang == "py":
-            ifc3_ele, ifc3_trans = \
-                get_fc3_spg_invariance(self._triplets, self._symmetry)
-
-        else:
-            import _mdfc
-            ifc3_ele, ifc3_trans = \
-            _mdfc.get_fc3_spg_invariance(np.array(self._triplets_reduced, dtype="intc"),
-                                       self._positions.copy(),
-                                       ind1['rotations'].astype("intc"),
-                                       ind1['translations'].copy(),
-                                       ind1['mappings'].astype("intc"),
-                                       ind2['rotations'].astype("intc"),
-                                       ind2['noperations'].astype("intc"),
-                                       ind2['mappings'].astype("intc"),
-                                       ind3['rotations'].astype("intc"),
-                                       ind3['noperations'].astype("intc"),
-                                       ind3['mappings'].astype("intc"),
-                                       self._lattice.copy(),
-                                       self._symprec)
-        independents = []
-        for i in range(len(self._triplets_reduced)):
-            indep, = np.where(ifc3_ele // 27 == i)
-            independents.append(indep)
-        num_irred = [len(ind) for ind in independents]
+        ifc3_ele, ifc3_trans = \
+            get_fc3_spg_invariance(self._triplets, self._symmetry)
+        num_irred = [len(ind) for ind in ifc3_ele]
 
         if is_md:
-            self._ifc3_ele = independents
+            self._ifc3_ele = ifc3_ele
             self._ifc3_trans = ifc3_trans
         else:
             if self._is_disperse:
                 from scipy.sparse import coo_matrix
                 trans = []
-                for i, in range(len(self._triplets_reduced)):
+                for i, in range(len(self._triplets)):
                     start = sum(num_irred[:i])
                     length = num_irred[i]
                     transform_tmp = np.zeros((27, sum(num_irred)), dtype="float")
@@ -1028,16 +986,16 @@ class ForceConstants():
                     transform_tmp_sparse = coo_matrix((transform_tmp[non_zero], non_zero), shape=transform_tmp.shape)
                     trans.append(transform_tmp_sparse)
             else:
-                trans = np.zeros((len(self._triplets_reduced), 27, sum(num_irred)), dtype="float")
-                for i in range(len(self._triplets_reduced)):
+                trans = np.zeros((len(self._triplets), 27, sum(num_irred)), dtype="float")
+                for i in range(len(self._triplets)):
                     start = sum(num_irred[:i])
                     length = num_irred[i]
                     trans[i,:, start:start + length] = ifc3_trans[:, start:start + length]
-            self._ifc3_ele = ifc3_ele
+            self._ifc3_ele = sum([map(lambda x: x + 27 * i, ele) for (i, ele) in enumerate(ifc3_ele)], [])
             self._ifc3_trans = trans
             if DEBUG:
                 fc3_read = self._fc3_read
-                fc3_reduced_triplets = np.double([fc3_read[index] for index in self._triplets_reduced])
+                fc3_reduced_triplets = np.double([fc3_read[index] for index in self._triplets])
                 fc3_reduced = fc3_reduced_triplets.flatten()[self._ifc3_ele]
                 fc3_reduced_triplets2 = np.zeros_like(fc3_reduced_triplets)
                 for i in range(len(fc3_reduced_triplets)):
@@ -1047,7 +1005,7 @@ class ForceConstants():
 
     def get_fc3_translational_invariance(self):
         if self._fc3_read is not None:
-            fc3_reduced_pair = np.array([self._fc3_read[triplet] for triplet in self._triplets_reduced])
+            fc3_reduced_pair = np.array([self._fc3_read[triplet] for triplet in self._triplets])
             fc3_irr_orig = fc3_reduced_pair.flatten()[self._ifc3_ele]
         irreducible_tmp, transform_tmp = \
             get_fc3_translational_invariance(self._supercell,
@@ -1068,7 +1026,7 @@ class ForceConstants():
 
     def get_fc3_rotational_invariance(self, fc2):
         if self._fc3_read is not None:
-            fc3_reduced_pair = np.array([self._fc3_read[triplet] for triplet in self._triplets_reduced])
+            fc3_reduced_pair = np.array([self._fc3_read[triplet] for triplet in self._triplets])
             fc3_irr_orig = fc3_reduced_pair.flatten()[self._ifc3_ele]
         rot_fc3_transform, rot_fc3_residue =\
             get_fc3_rotational_invariance(fc2,
@@ -1086,12 +1044,12 @@ class ForceConstants():
 
     def set_trim_fc3(self):
         if self._fc3_read is not None:
-            fc3_reduced_pair = np.array([self._fc3_read[triplet] for triplet in self._triplets_reduced])
+            fc3_reduced_pair = np.array([self._fc3_read[triplet] for triplet in self._triplets])
             fc3_irr_orig = fc3_reduced_pair.flatten()[self._ifc3_ele]
         irreducible_tmp, transform_tmp = \
             get_trim_fc3(self._supercell,
                          self._ifc3_trans,
-                         self._triplets_reduced,
+                         self._triplets,
                          symprec=self._symprec,
                          precision=self._precision,
                          triplets_included=self._triplets_included)

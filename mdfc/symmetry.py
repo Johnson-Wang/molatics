@@ -154,14 +154,14 @@ class Symmetry():
         """Get the transformation tensor3 of 3rd anharmonic force constants
         Rot.Perm(Phi) = Psi*, where Phi* is the known one.
         """
-        lattice = self.cell.get_lattice().T
+        lattice = self.cell.get_cell().T
         nopes = len(self.pointgroup_operations)
         self.tensor3 = np.zeros((nopes*6, 27,27), dtype='double')
         for i, rot in enumerate(self.pointgroup_operations):
             rot_cart = similarity_transformation(lattice, rot)
             tensor3 = np.kron(np.kron(rot_cart, rot_cart), rot_cart).reshape(3,3,3,27)
             for j, perm in enumerate(permutations("ijk")):
-                self.tensor3[i+j*nopes] = np.einsum("ijkl->%sl"%perm, tensor3).reshape(27,27)
+                self.tensor3[i+j*nopes] = np.einsum("ijkl->%s%s%sl"%perm, tensor3).reshape(27,27)
 
     def get_all_operations_at_star(self, atom):
         star = self.mapping[atom]
