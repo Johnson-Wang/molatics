@@ -1,9 +1,9 @@
 __author__ = 'xinjiang'
 import numpy as np
-from mdfc.fcmath import gaussian_py, similarity_transformation, mat_dot_product, gaussian
+from mdfc.fcmath import gaussian_py, mat_dot_product, gaussian
 from itertools import permutations
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
-from fc2 import get_index_of_atom, get_indices_of_atoms
+from fc2 import get_indices_of_atoms
 
 def get_bond_symmetry(site_symmetry,
                       positions,
@@ -55,9 +55,6 @@ def get_fc3_coefficients(triplets, symmetry): # returning the fc3 coefficients a
                     is_found = True
                     break
             assert is_found
-
-
-
     #First atoms in peripheral cells are considered here
     for atom1 in np.arange(natom):
         if atom1 in unique:
@@ -69,13 +66,6 @@ def get_fc3_coefficients(triplets, symmetry): # returning the fc3 coefficients a
         atom3_ = atom2_
         ifc_map[atom1, :, :] = ifc_map[atom1_, atom2_, atom3_]
         coefficients[atom1, :, :] = coefficients[atom1_, atom2_, atom3_]
-        # for atom2, atom3 in np.ndindex((natom, natom)):
-        #     pos_atom2 = positions[atom2] - disp
-        #     atom2_ = get_index_of_atom(pos_atom2, positions, symmetry.symprec)
-        #     pos_atom3 = positions[atom3] - disp
-        #     atom3_ = get_index_of_atom(pos_atom3, positions, symmetry.symprec)
-        #     ifc_map[atom1, atom2, atom3] = ifc_map[atom1_, atom2_, atom3_]
-        #     coefficients[atom1, atom2, atom3] = coefficients[atom1_, atom2_, atom3_]
     return coefficients, ifc_map
 
 

@@ -98,6 +98,8 @@ class ForceConstants():
         self._triplets_included = None
         self._triplets = None
         self._fc2 = None
+        self._ifc2_ele = None
+        self._ifc2_trans = None
         self._fc2_read = None
         self._fc3_read = None
         self._fc3_irred = None
@@ -521,7 +523,19 @@ class ForceConstants():
     def get_fc2_coefficients(self):
         self._ifc2_map, self._coeff2 = get_fc2_coefficients(self._pairs, self._symmetry)
 
-    def get_irreducible_fc2_components_with_spg(self, is_md=False):
+    def fc2_coefficient(self, atom1=None, atom2=None):
+        if atom1 is not None:
+            if atom2 is not None:
+                return self._symmetry.tensor2[self._coeff2[atom1, atom2]].swapaxes(-1, -2)
+            else:
+                return self._symmetry.tensor2[self._coeff2[atom1, :]].swapaxes(-1,-2)
+        else:
+            if atom2 is not None:
+                return self._symmetry.tensor2[self._coeff2[:, atom2]].swapaxes(-1,-2)
+            else:
+                return self._symmetry.tensor2[self._coeff2].swapaxes(-1, -2)
+
+    def get_irreducible_fc2_components_with_spg(self):
         if self._symmetry.tensor2 is None:
             self._symmetry.set_tensor2()
         ifc2_ele, ifc2_trans = \
@@ -529,19 +543,18 @@ class ForceConstants():
                                    self._symmetry)
         num_irred = [len(ele) for ele in ifc2_ele]
 
-        if not is_md:
-            ifc2_ele_array = np.zeros(sum(num_irred), dtype=int)
-            trans = np.zeros((len(ifc2_ele), 9, sum(num_irred)), dtype="float")
-            for i, length in enumerate(num_irred):
-                start = sum(num_irred[:i])
-                end = start + length
-                ifc2_ele_array[start:end] = np.array(ifc2_ele[i]) + i * 9
-                trans[i,:, start:end] = ifc2_trans[:, start:end]
-            self._ifc2_ele = ifc2_ele_array
-            self._ifc2_trans = trans
-        else:
-            self._ifc2_ele = ifc2_ele
-            self._ifc2_trans = ifc2_trans
+        rows = []; columns = []; V = []
+        for i, length in enumerate(num_irred):
+            start = sum(num_irred[:i])
+            end = start + length
+            trans_tmp = ifc2_trans[:, start:end]
+            non_zero = np.nonzero(trans_tmp)
+            rows.append(i * 9 + non_zero[0])
+            columns.append(start + non_zero[1])
+            V.append(trans_tmp[non_zero])
+        rows = np.hstack(rows); columns = np.hstack(columns); V = np.hstack(V)
+        self._ifc2_trans = coo_matrix((V, (rows, columns)), shape=(len(ifc2_ele) * 9, sum(num_irred)))
+        self._ifc2_ele = sum([map(lambda x: x + 9 * i, ele) for (i, ele) in enumerate(ifc2_ele)], [])
 
     def get_fc2_translational_invariance(self):
         if self._fc2_read is not None:
@@ -616,7 +629,7 @@ class ForceConstants():
             self.set_pair_reduced_included()
         print "Number of independent fc2 components: %d" % (len(self._pairs) * 9)
 
-        self.get_irreducible_fc2_components_with_spg(is_md)
+        self.get_irreducible_fc2_components_with_spg() # space group operation redundance
         print "Point group invariance reduces independent fc2 components to %d" % (self._ifc2_trans.shape[-1])
         print "Calculating transformation coefficients..."
         self.get_fc2_coefficients()
@@ -690,6 +703,26 @@ class ForceConstants():
             plt.ylabel("Tuned fc2 (eV/A^2)")
             plt.savefig("fc_tune_compare.pdf")
         write_fc2_hdf5(self._fc2, filename='fc2-tuned.hdf5')
+
+    def get_fc2_forces(self, displacements):
+        nele = [len(ele) for ele in self._ifc2_ele]
+        self._fc2_irred = np.zeros(sum(nele), dtype='double')
+        forces = np.zeros_like(displacements)
+        for atom1 in np.arange(self._num_atom):
+            dist1 = displacements[atom1]
+            dist2 = displacements[:]
+            dist = dist2 - dist1
+
+            coeff = self._coeff2[atom1] #shape: [natom]
+            ele = (self._ifc2_map[atom1][:, np.newaxis] * 9 + np.arange(9)).flatten() # flattens the shape [natom, 9]
+
+            tensor2 = self._symmetry.tensor2[coeff] # shape:[natom, 9]
+            fc2_pairs = self._ifc2_trans[ele].dot(self._fc2_irred) # shape [natom*9, irred] * [irred]
+            fc2 = tensor2.flatten().dot(fc2_pairs) # shape:[natom*9]
+            fc2 = fc2.reshape(-1, 3, 3)
+            for i in range(3):
+                forces[:,i] = np.einsum('')
+
 
     def tune_fc3(self):
         len_element = len(self._ifc3_ele)
@@ -814,6 +847,7 @@ class ForceConstants():
             self._symmetry.set_tensor3()
         self.set_third_independents()
         print "Number of irreducible triplets found: %d" %(len(self._triplets))
+        print "Number of 3rd IFC: %d" %(27 * len(self._triplets))
         if (self._cutoff is not None) and (self._cutoff.get_cutoff_radius() is not None):
             triplets_inclusion = self._cutoff.get_triplet_inclusion(triplets=self._triplets)
             self.set_triplet_reduced_included(triplets_inclusion)
@@ -885,6 +919,18 @@ class ForceConstants():
             get_fc3_coefficients(self._triplets,
                                  self._symmetry)
 
+    def fc3_coefficient(self, atom1, atom2=None, atom3=None):
+        if atom2 is None and atom3 is None:
+            coeff = self._coeff3[atom1]
+        elif atom2 is not None and atom3 is None:
+            coeff = self._coeff3[atom1, atom2, :]
+        elif atom2 is None and atom3 is not None:
+            coeff = self._coeff3[atom1, :, atom2]
+        else: #atom2 is not None and atom3 is not None
+            coeff = self._coeff3[atom1, atom2, atom3]
+        tensor = self._symmetry.tensor3[coeff]
+        return tensor.swapaxes(-1, -2)
+
     @timeit
     def distribute_fc3(self):
         coeff = self._coeff3
@@ -943,65 +989,34 @@ class ForceConstants():
                 fc2[atom1, atom2] = fc2[ip, jp]
         self._fc2 = fc2
 
-    def get_fc3_eye_mappings(self):
-        "Get the eye mappings of fc3 (translational invariance)"
-        s2u_map = self._supercell.get_supercell_to_unitcell_map()
-        scaled_positions = self._supercell.get_scaled_positions()
-        fc3_eye_mappings = np.zeros((len(np.unique(s2u_map)), self._num_atom, self._num_atom, 3), dtype='intc')
-        for atom1 in range(self._num_atom):
-            if atom1 in s2u_map:
-                for atom2, atom3 in np.ndindex((self._num_atom, self._num_atom)):
-                    fc3_eye_mappings[atom1, atom2, atom3] = np.array([atom1, atom2, atom3])
-            else:
-                ip = s2u_map[atom1]
-                l = scaled_positions[atom1] - scaled_positions[ip]
-                for atom2 in range(self._num_atom):
-                    disp2 = scaled_positions[atom2] - l - scaled_positions
-                    jp = np.where(np.all(np.abs(disp2 - np.rint(disp2)) < self._symprec, axis=-1))[0][0]
-                    for atom3 in range(self._num_atom):
-                        disp3 = scaled_positions[atom3] - l - scaled_positions
-                        kp = np.where(np.all(np.abs(disp3 - np.rint(disp3)) < self._symprec, axis=-1))[0][0]
-                        fc3_eye_mappings[atom1, atom2, atom3] = np.array([ip, jp, kp])
-        self._fc3_eye_mappings = fc3_eye_mappings
-
     @timeit
     def get_irreducible_fc3_components_with_spg(self, lang="py", is_md = False):
         ifc3_ele, ifc3_trans = \
             get_fc3_spg_invariance(self._triplets, self._symmetry)
         num_irred = [len(ind) for ind in ifc3_ele]
-
-        if is_md:
-            self._ifc3_ele = ifc3_ele
-            self._ifc3_trans = ifc3_trans
-        else:
-            if self._is_disperse:
-                from scipy.sparse import coo_matrix
-                trans = []
-                for i, in range(len(self._triplets)):
-                    start = sum(num_irred[:i])
-                    length = num_irred[i]
-                    transform_tmp = np.zeros((27, sum(num_irred)), dtype="float")
-                    transform_tmp[:, start:start + length] = ifc3_trans[:, start:start + length]
-                    non_zero = np.where(np.abs(transform_tmp) > self._symprec)
-                    transform_tmp_sparse = coo_matrix((transform_tmp[non_zero], non_zero), shape=transform_tmp.shape)
-                    trans.append(transform_tmp_sparse)
-            else:
-                trans = np.zeros((len(self._triplets), 27, sum(num_irred)), dtype="float")
-                for i in range(len(self._triplets)):
-                    start = sum(num_irred[:i])
-                    length = num_irred[i]
-                    trans[i,:, start:start + length] = ifc3_trans[:, start:start + length]
-            self._ifc3_ele = sum([map(lambda x: x + 27 * i, ele) for (i, ele) in enumerate(ifc3_ele)], [])
-            self._ifc3_trans = trans
-            if DEBUG:
-                fc3_read = self._fc3_read
-                fc3_reduced_triplets = np.double([fc3_read[index] for index in self._triplets])
-                fc3_reduced = fc3_reduced_triplets.flatten()[self._ifc3_ele]
-                fc3_reduced_triplets2 = np.zeros_like(fc3_reduced_triplets)
-                for i in range(len(fc3_reduced_triplets)):
-                    fc3_reduced_triplets2[i] = mat_dot_product(self._ifc3_trans[i], fc3_reduced, is_sparse=self._is_disperse)
-                diff = fc3_reduced_triplets2 - fc3_reduced_triplets.reshape(-1, 27)
-                print np.abs(diff).max()
+        rows = []
+        columns = []
+        V = []
+        for i in range(len(self._triplets)):
+            start = sum(num_irred[:i])
+            length = num_irred[i]
+            trans_tmp = ifc3_trans[:, start:start + length]
+            non_zero = np.nonzero(trans_tmp)
+            rows.append(i * 27 + non_zero[0]) # nonzero rows
+            columns.append(non_zero[1] + start)
+            V.append(trans_tmp[non_zero])
+        rows = np.hstack(rows); columns = np.hstack(columns); V = np.hstack(V)
+        self._ifc3_trans = coo_matrix((V, (rows,columns)), shape=(len(self._triplets) * 27, sum(num_irred)))
+        self._ifc3_ele = sum([map(lambda x: x + 27 * i, ele) for (i, ele) in enumerate(ifc3_ele)], [])
+        if DEBUG:
+            fc3_read = self._fc3_read
+            fc3_reduced_triplets = np.double([fc3_read[index] for index in self._triplets])
+            fc3_reduced = fc3_reduced_triplets.flatten()[self._ifc3_ele]
+            fc3_reduced_triplets2 = np.zeros_like(fc3_reduced_triplets)
+            for i in range(len(fc3_reduced_triplets)):
+                fc3_reduced_triplets2[i] = mat_dot_product(self._ifc3_trans[i], fc3_reduced, is_sparse=self._is_disperse)
+            diff = fc3_reduced_triplets2 - fc3_reduced_triplets.reshape(-1, 27)
+            print np.abs(diff).max()
 
     def get_fc3_translational_invariance(self):
         if self._fc3_read is not None:

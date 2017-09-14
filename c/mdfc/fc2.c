@@ -55,3 +55,33 @@ void rearrange_disp_fc2(double *ddcs,
     }
   }
 }
+//
+//void forces_from_fc2(double (*forces)[3],
+//                    const double (*dist)[3],
+//                    const double *fc2_reduced,
+//                    const double *trans,
+//                    const int *nindep,
+//                    const int *coeff, // shape[natom, natom, natom]
+//                    const int *fc2_map,  // shape[natom, natom, natom]
+//                    const double (*tensor2)[9][9],
+//                    const int num_step,
+//                    const int num_atom,
+//                    const int num_triplet){
+//    int i, j, k, index, map, num_reduced=0;
+//    double tr;
+//    for (i = 0; i < num_triplet; i++)
+//        num_reduced += nindep[i];
+//    for (i = 0; i < num_step; i++){
+//        for (j = 0; j < num_atom; j++){
+//            for (k = 0; k < num_atom; k++)
+//            {
+//               index = coeff[j * num_atom + k];
+//               tr = tensor2[index];
+//               map = fc2_map[j*num_atom+k];
+//
+//               trans[]
+//            }
+//        }
+//    }
+//
+//}

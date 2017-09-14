@@ -2,10 +2,7 @@ __author__ = 'xinjiang'
 from itertools import permutations
 import numpy as np
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
-from phonopy.structure.atoms import Atoms
-from mdfc.symmetry import Symmetry
-from mdfc.fcmath import similarity_transformation, gaussian, mat_dot_product
-from realmd.memory_profiler import profile
+from mdfc.fcmath import  gaussian, mat_dot_product
 
 
 def get_index_of_atom(pos_atom, positions, symprec=1e-6):
@@ -228,43 +225,6 @@ def get_fc2_rotational_invariance(supercell,
         independent = np.array([independent[i] for i in independent_gw])
         transform = np.dot(transform,transform_gw)
     return independent, transform
-
-def get_fc2_coefficient_and_mapping(doublets_reduced, pairs, symmetry, cell):
-    natom = cell.get_number_of_atoms()
-    positions = cell.get_scaled_positions()
-    coeff = np.zeros((natom, natom, 9, 9), dtype=np.float)
-    ifc_map = np.zeros((natom, natom), dtype="intc")
-    lattice = cell.get_cell().T
-    for atom1 in np.arange(natom):
-        nmap = symmetry.get_map_operations()[atom1]
-        map_syms = symmetry.get_symmetry_operation(nmap)
-        a1 = symmetry.get_map_atoms()[atom1]
-        index1 = np.where(symmetry.get_independent_atoms() == a1)[0][0] # index of the first irreducible atom
-        site_symmetries = pairs[index1]['site_symmetry']
-        r1 = map_syms['rotations']
-        t = map_syms['translations']
-        for atom2 in np.arange(natom):
-            map_atom2 = get_atom_sent_by_operation(atom2, positions, r1, t)
-            a2 = pairs[index1]['mapping'][map_atom2]
-            index2 = np.where(pairs[index1]['independent_atoms'] == a2)[0][0]# index of the second irreducible atom
-            r2 = site_symmetries[pairs[index1]['mapping_operation'][map_atom2]]
-            R = np.dot(r2, r1)
-            R_cart = np.double(similarity_transformation(lattice, R))
-            coeff_temp = np.einsum("ij, kl -> ikjl", R_cart, R_cart).reshape(9,9)
-            star2 = pairs[index1]['next_atoms'][index2]
-            if star2['tunnel'] is None:
-                ifc_map[atom1, atom2] = doublets_reduced.index((a1, a2))
-            else:
-                i1, i2 = star2['tunnel']['star']
-                a1 = pairs[i1]['atom_number']
-                a2 = pairs[i1]['next_atoms'][i2]['atom_number']
-                permu_trans = star2['tunnel']['transformation']
-                ifc_map[atom1, atom2] = doublets_reduced.index((a1, a2))
-                coeff_temp = np.dot(permu_trans, coeff_temp)
-                #take the permutation matrix into consideration
-            coeff[atom1, atom2] = coeff_temp.T # inverse equals transpose
-    return coeff, ifc_map
-
 
 def show_drift_force_constants(force_constants, name="force constants"):
     num_atom = force_constants.shape[0]
