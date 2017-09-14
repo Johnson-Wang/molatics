@@ -75,6 +75,7 @@ def get_fc3_spg_invariance(triplets,
 
     independents = []
     transforms = []
+    tensor3 = symmetry.tensor3.toarray().reshape(-1, 27, 27)
     for itriplet, triplet in enumerate(triplets):
         bond_symmetry = symmetry.get_site_symmetry_at_atoms(triplet[:2])
         triplet_symmetry = symmetry.get_site_symmetry_at_atoms(triplet)
@@ -97,7 +98,7 @@ def get_fc3_spg_invariance(triplets,
             rot = symmetry.rot_multiply(rot3, symmetry.rot_multiply(rot2, rot1))
             # rot = rot3.rot2.rot1, the invariance says: rot.P(123) = 123
             rots = [symmetry.rot_multiply(rot, r) + i * len(symmetry.pointgroup_operations) for r in triplet_symmetry]
-            invariant_transforms.append(symmetry.tensor3[rots])
+            invariant_transforms.append(tensor3[rots])
         invariant_transforms = np.concatenate(invariant_transforms, axis=0)
         invariant_transforms = invariant_transforms - np.eye(27)
         invariant_transforms = invariant_transforms.reshape(-1, 27)

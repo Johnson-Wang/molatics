@@ -144,7 +144,7 @@ class Symmetry():
     def set_tensor2(self, is_sparse=False):
         """Get the transformation tensor2 of 2rd harmonic force constants
         Rot.Perm(Phi) = Phi*, where Phi* is the known one.
-        Tensor3.Phi = Phi* --> Phi = Tensor2.T.Phi
+        Tensor3.Phi = Phi* --> Phi = Phi*.Tensor3
         """
         lattice = self.cell.get_cell().T
         self.tensor2 = np.zeros((len(self.pointgroup_operations)*2, 9, 9), dtype='double')
@@ -153,17 +153,17 @@ class Symmetry():
             rot_cart = similarity_transformation(lattice, rot)
             tensor2 = np.kron(rot_cart, rot_cart)
             self.tensor2[i] = tensor2
-            self.tensor2[i+nopes] = tensor2.reshape(3,3,9).swapaxes(0,1).reshape(9,9).T
+            self.tensor2[i+nopes] = tensor2.reshape(3,3,9).swapaxes(0,1).reshape(9,9)
         if is_sparse:
             # non_zero = np.nonzero(self.tensor2)
             # transform_sparse = coo_matrix((self.tensor2, non_zero), shape=self.tensor2.shape)
             # transform_sparse = csr_matrix(self.tensor2)
-            self.tensor2 = csr_matrix(self.tensor2)
+            self.tensor2 = csr_matrix(self.tensor2.reshape(-1, 81))
 
     def set_tensor3(self, is_sparse=False):
         """Get the transformation tensor3 of 3rd anharmonic force constants
         Rot.Perm(Psi) = Psi*, where Psi* is the known one.
-        Tensor3.Psi = Psi* --> Psi = Tensor3.T.Psi
+        Tensor3.Psi = Psi* --> Psi = Psi*.Tensor3
         """
         lattice = self.cell.get_cell().T
         nopes = len(self.pointgroup_operations)
@@ -172,12 +172,12 @@ class Symmetry():
             rot_cart = similarity_transformation(lattice, rot)
             tensor3 = np.kron(np.kron(rot_cart, rot_cart), rot_cart).reshape(3,3,3,27)
             for j, perm in enumerate(permutations("ijk")):
-                self.tensor3[i+j*nopes] = np.einsum("ijkl->%s%s%sl"%perm, tensor3).reshape(27,27).T
+                self.tensor3[i+j*nopes] = np.einsum("ijkl->%s%s%sl"%perm, tensor3).reshape(27,27)
 
         if is_sparse:
             # non_zero = np.nonzero(self.tensor3)
             # transform_sparse = coo_matrix((self.tensor3, non_zero), shape=self.tensor3.shape)
-            self.tensor3 = csr_matrix(self.tensor3)
+            self.tensor3 = csr_matrix(self.tensor3.reshape(-1, 729))
 
     def get_all_operations_at_star(self, atom):
         star = self.mapping[atom]

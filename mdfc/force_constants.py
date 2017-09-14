@@ -553,7 +553,7 @@ class ForceConstants():
             columns.append(start + non_zero[1])
             V.append(trans_tmp[non_zero])
         rows = np.hstack(rows); columns = np.hstack(columns); V = np.hstack(V)
-        self._ifc2_trans = coo_matrix((V, (rows, columns)), shape=(len(ifc2_ele) * 9, sum(num_irred)))
+        self._ifc2_trans = coo_matrix((V, (rows, columns)), shape=(len(ifc2_ele) * 9, sum(num_irred))).tocsr()
         self._ifc2_ele = sum([map(lambda x: x + 9 * i, ele) for (i, ele) in enumerate(ifc2_ele)], [])
 
     def get_fc2_translational_invariance(self):
@@ -613,7 +613,7 @@ class ForceConstants():
 
     def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False, is_md=False):
         if self._symmetry.tensor2 is None:
-            self._symmetry.set_tensor2()
+            self._symmetry.set_tensor2(True)
         equivalent_atoms = self._symmetry.mapping
         print "Under the system symmetry"
         print "Number of first independent atoms: %4d" % len(np.unique(equivalent_atoms))
@@ -705,20 +705,18 @@ class ForceConstants():
         write_fc2_hdf5(self._fc2, filename='fc2-tuned.hdf5')
 
     def get_fc2_forces(self, displacements):
-        nele = [len(ele) for ele in self._ifc2_ele]
-        self._fc2_irred = np.zeros(sum(nele), dtype='double')
+        nele = len(self._ifc2_ele)
+        self._fc2_irred = np.zeros(nele, dtype='double')
         forces = np.zeros_like(displacements)
         for atom1 in np.arange(self._num_atom):
-            dist1 = displacements[atom1]
-            dist2 = displacements[:]
-            dist = dist2 - dist1
+            dist = displacements[:]
 
             coeff = self._coeff2[atom1] #shape: [natom]
             ele = (self._ifc2_map[atom1][:, np.newaxis] * 9 + np.arange(9)).flatten() # flattens the shape [natom, 9]
-
             tensor2 = self._symmetry.tensor2[coeff] # shape:[natom, 9]
             fc2_pairs = self._ifc2_trans[ele].dot(self._fc2_irred) # shape [natom*9, irred] * [irred]
-            fc2 = tensor2.flatten().dot(fc2_pairs) # shape:[natom*9]
+
+            fc2 = tensor2.reshape(-1, 9).dot(fc2_pairs) # shape:[natom*9]
             fc2 = fc2.reshape(-1, 3, 3)
             for i in range(3):
                 forces[:,i] = np.einsum('')
@@ -782,65 +780,6 @@ class ForceConstants():
             plt.savefig("fc3_tune_compare.pdf")
         self.distribute_fc3()
         write_fc3_hdf5(self._fc3, filename='fc3-tuned.hdf5')
-
-    #
-    # def tune_fc3(self):
-    #     len_element = len(self._ifc3_ele)
-    #     first_atoms = np.unique(self._supercell.get_supercell_to_unitcell_map())
-    #     natom = self._num_atom
-    #     fc3_read = self._fc3_read[first_atoms].flatten()
-    #     print "Solving the least square problem..."
-    #     if self._is_disperse:
-    #         import scipy
-    #         from scipy.sparse import dok_matrix
-    #         transform_sparse = dok_matrix((len(first_atoms)*self._num_atom*self._num_atom*27, len_element),dtype='double')
-    #         for first in range(len(first_atoms)):
-    #             for j, k in np.ndindex((self._num_atom, self._num_atom)):
-    #                 first_index_tmp = first * natom * natom * 27 + j * natom * 27 + k * 27
-    #                 transform_tmp = mat_dot_product(self._coeff3[first,j, k],
-    #                                                 self._ifc3_trans[self._ifc3_map[first, j, k]],
-    #                                                 is_sparse=True)
-    #                 non_zero = np.where(np.abs(transform_tmp) > self._precision / 1e2)
-    #                 for (m, n) in zip(*non_zero):
-    #                     transform_sparse[first_index_tmp + m, n] = transform_tmp[m, n]
-    #         transform_sparse = transform_sparse.tocoo()
-    #         lsqr_results = scipy.sparse.linalg.lsqr(transform_sparse, fc3_read)
-    #         self._fc3_irred = lsqr_results[0]
-    #         fc_tuned = mat_dot_product(transform_sparse, self._fc3_irred, is_sparse=True)
-    #         error = lsqr_results[3] / len(first_atoms) / self._num_atom
-    #     else:
-    #         transform = np.zeros((len(first_atoms), self._num_atom,self._num_atom, 27, len_element), dtype='double')
-    #         for first in range(len(first_atoms)):
-    #             for j, k in np.ndindex((self._num_atom, self._num_atom)):
-    #                 transform[first, j, k] = mat_dot_product(self._coeff3[first,j, k],
-    #                                                          self._ifc3_trans[self._ifc3_map[first, j, k]],
-    #                                                          is_sparse=True)
-    #         transform2 = transform.reshape(-1, len_element)
-    #         try:
-    #             import scipy
-    #             non_zero = np.where(np.abs(transform2) > self._precision / 1e2)
-    #             transform_sparse = scipy.sparse.coo_matrix((transform2[non_zero], non_zero), shape=transform2.shape)
-    #             lsqr_results = scipy.sparse.linalg.lsqr(transform_sparse, fc3_read)
-    #             self._fc3_irred = lsqr_results[0]
-    #             fc_tuned = mat_dot_product(transform2, self._fc3_irred, is_sparse=True)
-    #             error = lsqr_results[3] / len(first_atoms) / self._num_atom
-    #         except ImportError:
-    #             transform_pinv = np.linalg.pinv(transform2)
-    #             self._fc3_irred = np.dot(transform_pinv, fc3_read)
-    #             fc_tuned = np.dot(transform2, self._fc3_irred)
-    #             error = np.sqrt(np.sum((fc_tuned - fc3_read)**2))\
-    #                     / len(first_atoms) / self._num_atom
-    #     print "FC3 tunning process using the least-square method has completed"
-    #     print "    with least square error: %f (eV/A^3)" %error
-    #
-    #     if DEBUG:
-    #         plt.figure()
-    #         plt.scatter(fc3_read.flatten(), fc_tuned.flatten(), color='red', s=3)
-    #         plt.plot(np.array([fc3_read.min(), fc3_read.max()]),
-    #                  np.array([fc3_read.min(), fc3_read.max()]), color='blue')
-    #         plt.savefig("fc3_tune_compare.pdf")
-    #     self.distribute_fc3()
-    #     write_fc3_hdf5(self._fc3, filename='fc3-tuned.hdf5')
 
     def set_fc3_irreducible_components(self, is_trans_inv = False, is_rot_inv = False):
         if self._symmetry.tensor3 is None:
@@ -1006,7 +945,7 @@ class ForceConstants():
             columns.append(non_zero[1] + start)
             V.append(trans_tmp[non_zero])
         rows = np.hstack(rows); columns = np.hstack(columns); V = np.hstack(V)
-        self._ifc3_trans = coo_matrix((V, (rows,columns)), shape=(len(self._triplets) * 27, sum(num_irred)))
+        self._ifc3_trans = coo_matrix((V, (rows,columns)), shape=(len(self._triplets) * 27, sum(num_irred))).tocsr()
         self._ifc3_ele = sum([map(lambda x: x + 27 * i, ele) for (i, ele) in enumerate(ifc3_ele)], [])
         if DEBUG:
             fc3_read = self._fc3_read

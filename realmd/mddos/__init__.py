@@ -149,7 +149,6 @@ class MolecularDynamicsCoordinateVelocity():
             self.atom_types = atom_types
             self.num_atom = num_atom
 
-    @profile
     def read_hdf5_file(self,filename):
         try:
             import h5py

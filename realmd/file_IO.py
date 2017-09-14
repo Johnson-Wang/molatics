@@ -481,7 +481,7 @@ def read_md_from_vasprun(vasp_filename, steps=None):
     from lxml import etree
     f = open(vasp_filename, "r")
     lines = f.read()
-    if lines.strip()[-100].find("</modeling>") == -1:
+    if lines.strip()[-100:].find("</modeling>") == -1:
         if lines.strip()[-8:] == "<scstep>":
             lines += "</scstep>\n"
         lines += "</calculation>\n"

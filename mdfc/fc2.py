@@ -67,10 +67,12 @@ def get_fc2_spg_invariance(pairs, symmetry):
     trans = []
     indeps = []
     npgope = len(symmetry.pointgroup_operations)
+    tensor2 = symmetry.tensor2.toarray().reshape(-1, 9, 9)
     for i,pair in enumerate(pairs):
         atom1, atom2 = pair
         bond_symmetry = symmetry.get_site_symmetry_at_atoms([atom1, atom2])
-        invariant_transforms = symmetry.tensor2[bond_symmetry]
+
+        invariant_transforms = tensor2[bond_symmetry]
         # find all symmetries that keep the bond atom1-atom2 invariant
         ###############For permutations#######################
         if symmetry.mapping[atom2] == atom1:
@@ -85,7 +87,7 @@ def get_fc2_spg_invariance(pairs, symmetry):
                                   for sym in bond_symmetry]
                 #R.P.12 = 12, where P is a permutation matrix and R is a rotational matrix
                 invariant_transforms =\
-                    np.concatenate((invariant_transforms, symmetry.tensor2[bond_symmetry2]), axis=0)
+                    np.concatenate((invariant_transforms, tensor2[bond_symmetry2]), axis=0)
         invariant_transforms -= np.eye(9)
         invariant_transforms = invariant_transforms.reshape(-1,9)
         CC, transform, independent = gaussian(invariant_transforms)

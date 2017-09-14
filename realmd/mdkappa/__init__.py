@@ -14,7 +14,6 @@ class MolecularDynamicsForceEnergy(MDCV):
         self.atom_stresses = None
         self.volume = None
 
-    @profile
     def _set_from_file(self, fileformat="x", cv_filename="geo_end.xyz", fe_filename="fe.out"):
         "cv_filename: coordinates and velocities filename; fe_filename: forces and energies filename"
         if cv_filename == None:

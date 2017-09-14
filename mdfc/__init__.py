@@ -141,7 +141,6 @@ class MolecularDynamicsForceConstant:
         return self._fc2
     fc2 = property(get_fc2)
 
-    #@profile
     def run_fc2(self):
         self._fc.set_fc2_irreducible_elements(is_md=True)
         self._coeff2 = self._fc._coeff2
@@ -310,7 +309,7 @@ class MolecularDynamicsForceConstant:
     #@profile
     def set_fc3_irreducible_components(self, is_md=False):
         if self._symmetry.tensor3 is None:
-            self._symmetry.set_tensor3()
+            self._symmetry.set_tensor3(True)
         fc = self._fc
         fc.set_third_independents()
         print "Number of irreduble triplets: %d" %len(fc._triplets)
@@ -364,17 +363,13 @@ class MolecularDynamicsForceConstant:
 
     def calculate_fcs(self):
         fc = self._fc
+
         coeff = fc._coeff3
         ifcmap = fc._ifc3_map
-        ifc3_ele = [len(ele) for ele in fc._ifc3_ele]
-        trans = fc._ifc3_trans
-        num_irred = trans.shape[-1]
+        num_irred = self.irred_trans3.shape[-1]
         num_step = len(self._displacements)
-        first_atoms, indices = np.unique(self._supercell.get_supercell_to_unitcell_map(), return_inverse=True)
-        pos = self.supercell.get_scaled_positions()
-        sys.stdout.flush()
-        first_map = self._supercell.get_supercell_to_unitcell_map()
-
+        displacements = self._displacements
+        forces_fc2 = self._fc.get_fc2_forces(displacements)
 
         for atom1 in np.arange(self._num_atom):
             disp1 = self._displacements[:, atom1]
