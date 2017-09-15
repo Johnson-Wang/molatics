@@ -96,21 +96,27 @@ def get_positions_vasprun_xml(vasp_filename, step_range=slice(None)):
     for event, element in vasprun:
         if element.get('name') is not None:
             continue
-
         n += 1
         if n < start or (n-start) % step != 0:
             continue
 
+        crystal = element.find('crystal')
+
+        basis = []
+        for ele in crystal.findall('varray'):
+            if ele.get('name') == 'basis':
+                for v in ele.xpath('./v'):
+                    basis.append(map(float, v.text.split()))
+        basis = np.double(basis)
         position = []
         for ele in element.findall('varray'):
             if ele.get("name") == 'positions':
                 for v in ele.xpath('./v'):
                     position.append([float(x) for x in v.text.split()])
-                positions.append(position)
+        position = np.double(position).dot(basis) # convert to Cartesian coordinate
+        positions.append(position)
         if n == stop:
             break
-
-
     return np.array(positions, dtype="double")
 
 def get_atom_types_from_vasprun_xml(vasp_filename):
@@ -477,7 +483,7 @@ def read_md_from_vasprun(vasp_filename):
     from lxml import etree
     f = open(vasp_filename, "r")
     lines = f.read()
-    if lines.strip()[-100].find("</modeling>") == -1:
+    if lines.strip()[-100:].find("</modeling>") == -1:
         if lines.strip()[-8:] == "<scstep>":
             lines += "</scstep>\n"
         lines += "</calculation>\n"

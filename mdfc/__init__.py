@@ -263,7 +263,7 @@ class MolecularDynamicsForceConstant:
 
 
     def show_residual_forces_fc2(self):
-        # force_harm = np.einsum("Nbj, abij -> Nai",self._displacements, self.fc2)
+        # force_harm = np.tensordot(self._displacements, self.fc2, axes=((1, 2), (1, 3)))
         force_harm = np.dot(self._ddcs2, self.irred_fc2)
         resi_force = self._forces - force_harm
         self._forces1 = resi_force[:]
