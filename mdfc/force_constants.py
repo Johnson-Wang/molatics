@@ -478,20 +478,6 @@ class ForceConstants():
     def set_fc3_read(self, fc3_filename):
         self._fc3_read = read_fc3_from_hdf5(filename=fc3_filename)
 
-    def set_first_independents(self):
-        sym = self._symmetry
-        independents = {}
-        independents['atoms'] = np.unique(sym.mapping) # independent atoms
-        independents['natoms'] = len(independents['atoms']) # number of independent atoms
-        sym_operations = sym.symmetry_operations
-        independents['rotations'] = sym.rotations
-        independents['translations'] = sym_operations['translations']
-        independents['noperations'] = len(sym_operations['rotations'])
-        # rotations and translations forms all the operations
-        independents['mappings'] = sym.mapping
-        independents['mapping_operations'] = sym.mapping_operations
-        self._ind1 = independents
-
     def set_second_independents(self):
         symmetry = self._symmetry
         pairs = []
@@ -510,12 +496,12 @@ class ForceConstants():
                 pairs.append((atom1, atom2))
         self._pairs = pairs
 
-    def set_pair_reduced_included(self, pair_inclusion=None):
+    def set_pair_included(self, pair_inclusion=None):
         if pair_inclusion is None:
             pair_inclusion = np.ones(len(self._pairs), dtype=bool)
         self._pairs_included = pair_inclusion
 
-    def set_triplet_reduced_included(self, triplet_inclusion=None):
+    def set_triplet_included(self, triplet_inclusion=None):
         if triplet_inclusion is None:
             triplet_inclusion = np.ones(len(self._triplets), dtype=bool)
         self._triplets_included = triplet_inclusion
@@ -543,18 +529,15 @@ class ForceConstants():
                                    self._symmetry)
         num_irred = [len(ele) for ele in ifc2_ele]
 
-        rows = []; columns = []; V = []
+        ifc2_ele_array = np.zeros(sum(num_irred), dtype=int)
+        trans = np.zeros((len(ifc2_ele), 9, sum(num_irred)), dtype="float")
         for i, length in enumerate(num_irred):
             start = sum(num_irred[:i])
             end = start + length
-            trans_tmp = ifc2_trans[:, start:end]
-            non_zero = np.nonzero(trans_tmp)
-            rows.append(i * 9 + non_zero[0])
-            columns.append(start + non_zero[1])
-            V.append(trans_tmp[non_zero])
-        rows = np.hstack(rows); columns = np.hstack(columns); V = np.hstack(V)
-        self._ifc2_trans = coo_matrix((V, (rows, columns)), shape=(len(ifc2_ele) * 9, sum(num_irred))).tocsr()
-        self._ifc2_ele = sum([map(lambda x: x + 9 * i, ele) for (i, ele) in enumerate(ifc2_ele)], [])
+            ifc2_ele_array[start:end] = np.array(ifc2_ele[i]) + i * 9
+            trans[i, :, start:end] = ifc2_trans[:, start:end]
+        self._ifc2_ele = ifc2_ele_array
+        self._ifc2_trans = trans
 
     def get_fc2_translational_invariance(self):
         if self._fc2_read is not None:
@@ -622,11 +605,11 @@ class ForceConstants():
 
         if (self._cutoff is not None) and (self._cutoff.get_cutoff_radius()is not None):
             pair_inclusion = self._cutoff.get_pair_inclusion(pairs=self._pairs)
-            self.set_pair_reduced_included(pair_inclusion)
+            self.set_pair_included(pair_inclusion)
             print "The artificial cutoff reduces number of irreducible pairs from %4d to %4d"\
                   %(len(self._pairs), np.sum(self._pairs_included))
         else:
-            self.set_pair_reduced_included()
+            self.set_pair_included()
         print "Number of independent fc2 components: %d" % (len(self._pairs) * 9)
 
         self.get_irreducible_fc2_components_with_spg() # space group operation redundance
@@ -709,17 +692,17 @@ class ForceConstants():
         self._fc2_irred = np.zeros(nele, dtype='double')
         forces = np.zeros_like(displacements)
         for atom1 in np.arange(self._num_atom):
+
             dist = displacements[:]
-
-            coeff = self._coeff2[atom1] #shape: [natom]
-            ele = (self._ifc2_map[atom1][:, np.newaxis] * 9 + np.arange(9)).flatten() # flattens the shape [natom, 9]
-            tensor2 = self._symmetry.tensor2[coeff] # shape:[natom, 9]
-            fc2_pairs = self._ifc2_trans[ele].dot(self._fc2_irred) # shape [natom*9, irred] * [irred]
-
-            fc2 = tensor2.reshape(-1, 9).dot(fc2_pairs) # shape:[natom*9]
-            fc2 = fc2.reshape(-1, 3, 3)
-            for i in range(3):
-                forces[:,i] = np.einsum('')
+            for atom2 in np.arange(self._num_atom):
+                coeff = self._coeff2[atom1, atom2]
+                tensor2 = self._symmetry.tensor2[coeff].reshape(9,9)
+                ele = self._ifc2_map[atom1, atom2] * 9 + np.arange(9) # flattens the shape [natom, 9]
+                fc2_pairs = self._ifc2_trans[ele].dot(self._fc2_irred).reshape(-1, 9) # shape [9]
+                fc2 = tensor2.reshape(-1, 9).dot(fc2_pairs) # shape:[natom*9]
+                fc2 = fc2.reshape(-1, 3, 3)
+                for i in range(3):
+                    forces[:,i] = np.einsum('')
 
 
     def tune_fc3(self):
@@ -789,11 +772,11 @@ class ForceConstants():
         print "Number of 3rd IFC: %d" %(27 * len(self._triplets))
         if (self._cutoff is not None) and (self._cutoff.get_cutoff_radius() is not None):
             triplets_inclusion = self._cutoff.get_triplet_inclusion(triplets=self._triplets)
-            self.set_triplet_reduced_included(triplets_inclusion)
+            self.set_triplet_included(triplets_inclusion)
             print "The artificial cutoff reduces number of irreducible pairs from %4d to %4d"\
                   %(len(self._triplets), np.sum(self._triplets_included))
         else:
-            self.set_triplet_reduced_included()
+            self.set_triplet_included()
         self.get_irreducible_fc3_components_with_spg()
         print "spg invariance reduces 3rd IFC to %d" % (len(self._ifc3_ele))
         print "Calculating fc3 coefficient..."
@@ -929,23 +912,16 @@ class ForceConstants():
         self._fc2 = fc2
 
     @timeit
-    def get_irreducible_fc3_components_with_spg(self, lang="py", is_md = False):
+    def get_irreducible_fc3_components_with_spg(self):
         ifc3_ele, ifc3_trans = \
             get_fc3_spg_invariance(self._triplets, self._symmetry)
         num_irred = [len(ind) for ind in ifc3_ele]
-        rows = []
-        columns = []
-        V = []
+        trans = np.zeros((len(self._triplets), 27, sum(num_irred)), dtype="float")
         for i in range(len(self._triplets)):
             start = sum(num_irred[:i])
             length = num_irred[i]
-            trans_tmp = ifc3_trans[:, start:start + length]
-            non_zero = np.nonzero(trans_tmp)
-            rows.append(i * 27 + non_zero[0]) # nonzero rows
-            columns.append(non_zero[1] + start)
-            V.append(trans_tmp[non_zero])
-        rows = np.hstack(rows); columns = np.hstack(columns); V = np.hstack(V)
-        self._ifc3_trans = coo_matrix((V, (rows,columns)), shape=(len(self._triplets) * 27, sum(num_irred))).tocsr()
+            trans[i, :, start:start + length] = ifc3_trans[:, start:start + length]
+        self._ifc3_trans = trans
         self._ifc3_ele = sum([map(lambda x: x + 27 * i, ele) for (i, ele) in enumerate(ifc3_ele)], [])
         if DEBUG:
             fc3_read = self._fc3_read

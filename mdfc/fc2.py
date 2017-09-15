@@ -67,7 +67,7 @@ def get_fc2_spg_invariance(pairs, symmetry):
     trans = []
     indeps = []
     npgope = len(symmetry.pointgroup_operations)
-    tensor2 = symmetry.tensor2.toarray().reshape(-1, 9, 9)
+    tensor2 = symmetry.tensor2
     for i,pair in enumerate(pairs):
         atom1, atom2 = pair
         bond_symmetry = symmetry.get_site_symmetry_at_atoms([atom1, atom2])

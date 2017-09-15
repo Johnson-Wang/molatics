@@ -13,6 +13,7 @@ from mdfc.force_constants import ForceConstants
 from realmd.information import timeit, print_error_message, warning
 from copy import deepcopy
 from phonopy.interface.vasp import write_vasp
+import scipy.sparse as sparse
 
 def print_irred_fc2(pairs_reduced, ifc2_ele, irred_fc2):
     tensor = {0:'xx', 1:'xy', 2:'xz', 3:'yx', 4:'yy', 5:'yz', 6:'zx', 7:'zy',8:'zz'}
@@ -82,13 +83,8 @@ class MolecularDynamicsForceConstant:
         self._lattice = self.supercell.get_cell()
         self._num_atom = len(self._positions)
         self._normalize_factor = 1.
-        self.ifc2_map = None
         self._coeff2 = None
-        self._ind_atoms2 = None
         self._num_irred_fc2 = None
-        self.map_atoms2 = None
-        self.map_operations2 = None
-        self._coeff2 = None
         self._converge2 = False
         self._fc = ForceConstants(self.supercell,
                                   self.primitive,
@@ -143,10 +139,27 @@ class MolecularDynamicsForceConstant:
 
     def run_fc2(self):
         self._fc.set_fc2_irreducible_elements(is_md=True)
-        self._coeff2 = self._fc._coeff2
-        self.ifc2_map = self._fc._ifc2_map
-        self.irred_trans2 = self._fc._ifc2_trans
-        self._num_irred_fc2 = self._fc._ifc2_trans.shape[-1]
+        natom = self._num_atom
+        tensor2 = self._symmetry.tensor2
+        coeff_index = self._fc._coeff2
+        ifc2_map = self._fc._ifc2_map
+        irred_trans2 = self._fc._ifc2_trans
+        num_irred_fc2 = self._fc._ifc2_trans.shape[-1]
+
+        self._coeff2 = sparse.lil_matrix((natom * 3 * natom * 3, num_irred_fc2))
+        for atom1 in np.arange(natom):
+            coeff = tensor2[coeff_index[atom1]]
+            ipair = ifc2_map[atom1]
+            coeff_from_ele = np.einsum('ijk, ikm->ijm', coeff, irred_trans2[ipair])
+            for i in np.arange(3):
+                start = np.ravel_multi_index((atom1, i, 0, 0), dims=(natom, 3, natom, 3))
+                index_range = start + np.arange(natom * 3)
+                coeff_tmp = coeff_from_ele[:, i*3:i*3+3].reshape(-1, num_irred_fc2)
+                self._coeff2[index_range, :] = sparse.lil_matrix(coeff_tmp)
+
+
+
+
 
 
     def next(self):
@@ -363,55 +376,11 @@ class MolecularDynamicsForceConstant:
 
     def calculate_fcs(self):
         fc = self._fc
-
-        coeff = fc._coeff3
-        ifcmap = fc._ifc3_map
-        num_irred = self.irred_trans3.shape[-1]
         num_step = len(self._displacements)
         displacements = self._displacements
+        nele = len(self._fc._ifc2_ele)
+        self.irred_fc2 = np.zeros(nele, dtype='double')
         forces_fc2 = self._fc.get_fc2_forces(displacements)
-
-        for atom1 in np.arange(self._num_atom):
-            disp1 = self._displacements[:, atom1]
-            coeff = self._fc.fc2_coefficient(atom1)# shape[natom, 9, 9]
-            self._fc._ifc2_trans[:, ]
-            disp2 = self._displacements[:,:]
-
-
-        for atom1 in np.arange(self._num_atom):
-            disp1 = self._displacements[:, atom1]
-            coeff = self._fc.fc3_coefficient(atom1)
-
-            for atom2 in np.arange(self._num_atom):
-                disp2 = self._displacements[:, atom2]
-                for atom3 in np.arange(self._num_atom):
-                    disp3 = self._displacements[:, atom3]
-                    coeff = self._fc.fc3_coefficient(atom1, atom2, atom3)
-
-
-        for atom1 in np.arange(self._num_atom):
-            index1 = indices[atom1]
-            atom1_ = first_atoms[index1]
-            disp = pos[atom1_] - pos[atom1]
-            for atom2 in np.arange(self._num_atom):
-                atom2_ = get_atom_sent_by_operation(atom2, pos, np.eye(3), disp)
-                for atom3 in np.arange(atom2, self._num_atom):
-                    atom3_ = get_atom_sent_by_operation(atom3, pos, np.eye(3), disp)
-                    disp3 = self._displacements[:,atom3]
-                    num_triplet = ifcmap[index1, atom2_, atom3_]
-                    start = sum(ifc3_ele[:num_triplet])
-                    end = start + ifc3_ele[num_triplet]
-                    fc3_triplet = np.dot(trans[:, start:end], self._fc3_irred[start:end])
-                    fc3 = np.dot(coeff[index1, atom2_, atom3_], fc3_triplet).reshape(3,3,3)
-                    sum_temp = np.einsum("ijkn, Nj, Nk -> Nin", coeff_temp, disp2, disp3)
-                    if atom2 == atom3:
-                        sum_temp *= 2
-                    ddcs[:,atom1] += sum_temp
-        for i in range(self._divide):
-            ddcs = self._ddcs[i]
-            pinv = np.linalg.pinv(ddcs)
-            fcs = np.dot(pinv, self._forces.flatten())
-            self._fc_irred[i] = fcs
 
 
 

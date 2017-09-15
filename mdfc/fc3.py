@@ -75,7 +75,7 @@ def get_fc3_spg_invariance(triplets,
 
     independents = []
     transforms = []
-    tensor3 = symmetry.tensor3.toarray().reshape(-1, 27, 27)
+    tensor3 = symmetry.tensor3
     for itriplet, triplet in enumerate(triplets):
         bond_symmetry = symmetry.get_site_symmetry_at_atoms(triplet[:2])
         triplet_symmetry = symmetry.get_site_symmetry_at_atoms(triplet)
