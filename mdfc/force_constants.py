@@ -488,12 +488,13 @@ class ForceConstants():
                 atom2_, map_ope = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2)
                 if atom2_ < atom2:
                     continue #then this pair already exists.
-                if symmetry.mapping[atom2] != atom1:
-                    continue #this pair either exists or will be indexed later
-                atom2_ = symmetry.get_atom_sent_by_operation(atom1, symmetry.mapping_operations[atom2])
-                atom2_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2_)
-                if atom2_ < atom2:
-                    continue
+                if symmetry.mapping[atom2] < atom1:
+                    continue #this pair already exists
+                elif symmetry.mapping[atom2] == atom1:
+                    atom2_ = symmetry.get_atom_sent_by_operation(atom1, symmetry.mapping_operations[atom2])
+                    atom2_, _ = symmetry.get_atom_mapping_under_sitesymmetry(atom1, atom2_)
+                    if atom2_ < atom2:
+                        continue
                 pairs.append((atom1, atom2))
         self._pairs = pairs
 

@@ -28,10 +28,11 @@ def get_fc2_coefficients(pairs, symmetry):
     ifc_map = np.zeros((natom, natom), dtype="intc")
     #Consider atom1 in the first unit-cell
     first_cell = np.unique(s2u_map)
-    for atom1, atom2 in np.ndindex((natom, natom)):
+    for atom1 in np.arange(natom):
         if atom1 not in first_cell:
             continue
-        ifc_map[atom1, atom2], coeff[atom1, atom2] = get_fc2_coefficient_single(pairs, symmetry, atom1, atom2)
+        for atom2 in np.arange(natom):
+            ifc_map[atom1, atom2], coeff[atom1, atom2] = get_fc2_coefficient_single(pairs, symmetry, atom1, atom2)
     #Other pairs can be directly mapped using translational symmetry
     for atom1 in np.arange(natom):
         if atom1 in first_cell:
@@ -46,9 +47,9 @@ def get_fc2_coefficients(pairs, symmetry):
 
 def get_fc2_coefficient_single(pairs, symmetry, atom1=0, atom2=0):
     for i, (_atom1, _atom2) in enumerate(permutations([atom1, atom2])):
-        nope = symmetry.mapping_operations[atom1]
+        nope = symmetry.mapping_operations[_atom1]
         rot1 = symmetry.rotations[nope]
-        atom1_ = symmetry.mapping[atom1] # first irreducible atom
+        atom1_ = symmetry.mapping[_atom1] # first irreducible atom
         atom2_ = symmetry.get_atom_sent_by_operation(_atom2, nope) # second atom should move with the first one
         atom2_, rot2 = symmetry.get_atom_mapping_under_sitesymmetry(atom1_, atom2_) # second irreducible atom
         if (atom1_, atom2_) not in pairs:
