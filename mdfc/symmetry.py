@@ -151,9 +151,11 @@ class Symmetry():
         nopes = len(self.pointgroup_operations)
         for i, rot in enumerate(self.pointgroup_operations):
             rot_cart = similarity_transformation(lattice, rot)
-            tensor2 = np.kron(rot_cart, rot_cart)
-            self.tensor2[i] = tensor2
-            self.tensor2[i+nopes] = tensor2.reshape(3,3,9).swapaxes(0,1).reshape(9,9)
+            tensor2 = np.kron(rot_cart, rot_cart).reshape(3,3,9)
+            for j, perm in enumerate(permutations('ij')):
+                self.tensor2[i+j*nopes] = np.einsum("ijk->%s%sk"%perm, tensor2).reshape(9,9).T
+            # self.tensor2[i] = tensor2.T
+            # self.tensor2[i+nopes] = tensor2.reshape(3,3,9).swapaxes(0,1).reshape(9,9).T
         # if is_sparse:
             # non_zero = np.nonzero(self.tensor2)
             # transform_sparse = coo_matrix((self.tensor2, non_zero), shape=self.tensor2.shape)
@@ -163,7 +165,7 @@ class Symmetry():
     def set_tensor3(self, is_sparse=False):
         """Get the transformation tensor3 of 3rd anharmonic force constants
         Rot.Perm(Psi) = Psi*, where Psi* is the known one.
-        Tensor3.Psi = Psi* --> Psi = Psi*.Tensor3
+        Tensor3.Psi = Psi* --> Psi = Tensor3.T.Psi* --> Psi = Psi*.Tensor3
         """
         lattice = self.cell.get_cell().T
         nopes = len(self.pointgroup_operations)
@@ -172,7 +174,7 @@ class Symmetry():
             rot_cart = similarity_transformation(lattice, rot)
             tensor3 = np.kron(np.kron(rot_cart, rot_cart), rot_cart).reshape(3,3,3,27)
             for j, perm in enumerate(permutations("ijk")):
-                self.tensor3[i+j*nopes] = np.einsum("ijkl->%s%s%sl"%perm, tensor3).reshape(27,27)
+                self.tensor3[i+j*nopes] = np.einsum("ijkl->%s%s%sl"%perm, tensor3).reshape(27,27).T
 
         # if is_sparse:
             # non_zero = np.nonzero(self.tensor3)

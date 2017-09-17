@@ -92,6 +92,8 @@ parser.set_defaults(
     is_wien2k_p1=False,
     is_rotational=False,
     is_translational=False,
+    is_write_coeff = False,
+    is_read_coeff = False,
     precision=1e-6,
     loglevel=None,
     primitive_axis=None,
@@ -143,6 +145,12 @@ parser.add_option("--readfc2", dest="read_fc2",
 parser.add_option("--readfc3", dest="read_fc3",
                   action="store", type='string',
                   help="Read 3nd force constants and tune the elements to satisfy physical (symmetry) conditions")
+parser.add_option("--write_coeff", "--write_coefficients", dest="is_write_coeff",
+                  action="store_true",
+                  help="Save the force constant transformation matrix")
+parser.add_option("--read_coeff", "--read_coefficients", dest="is_read_coeff",
+                  action="store_true",
+                  help="Read the force constant transformation matrix")
 parser.add_option("--hdf5", dest="is_hdf5", action="store_true",
                   help="Use hdf5 for force constants")
 parser.add_option("--fc3", dest="is_fc3", action="store_true",
@@ -226,8 +234,8 @@ if log_level > 0:
 if len(args) > 0:
     file_exists(args[0])
     mdfc_conf = ConfParser(filename=args[0],
-                              options=options,
-                              option_list=option_list)
+                           options=options,
+                           option_list=option_list)
     settings = mdfc_conf.get_settings()
 else:
     mdfc_conf = ConfParser(options=options,
@@ -299,6 +307,8 @@ mdfc = MDFC(unitcell,
 if settings.get_is_translational_invariance() or settings.get_is_rotational_invariance():
     mdfc.fc.set_smallest_vectors()
 
+mdfc.run_fc2(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
+mdfc.run_fc3(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
 if settings.get_read_fc2() is not None:
     print "##########%s is read and tunned to satisfy symmetry conditions#############" %settings.get_read_fc2()
     print "Precision used for reducing symmetry constraints: %e" %settings.get_precision()
@@ -375,10 +385,10 @@ mdfc.init_disp_and_forces(coordinates = md.atom_coordinates, forces = md.atom_fo
 
 if settings.get_is_fc2():
     print "##################Reducing total number of fc2#############################"
-    mdfc.run_fc2()
+    mdfc.run_fc2(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
 if settings.get_is_fc3():
     print "##################Reducing total number of fc3#############################"
-    mdfc.run_fc3()
+    mdfc.run_fc3(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
 
 print "###################Fitting force constants##############################"
 mdfc.calculate_fcs()

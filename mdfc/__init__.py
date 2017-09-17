@@ -14,6 +14,7 @@ from realmd.information import timeit, print_error_message, warning
 from copy import deepcopy
 from phonopy.interface.vasp import write_vasp
 import scipy.sparse as sparse
+from realmd.memory_profiler import profile
 
 def print_irred_fc2(pairs_reduced, ifc2_ele, irred_fc2):
     tensor = {0:'xx', 1:'xy', 2:'xz', 3:'yx', 4:'yy', 5:'yz', 6:'zx', 7:'zy',8:'zz'}
@@ -71,6 +72,10 @@ class MolecularDynamicsForceConstant:
         self._symmetry = None
         self._set_symmetry()
         self._fc2 = None
+        self._fc2_irred = None
+        self._fc3 = None
+        self._fc3_irred = None
+        self._coeff3 = None
         self.set_cutoffs(cutoff_radius)
         self._cutoff_force=cutoff_force
         self._cutoff_disp = cutoff_disp
@@ -98,10 +103,8 @@ class MolecularDynamicsForceConstant:
         self._fc3 = None
         self._fc3_irred = None
 
-
     def __iter__(self):
         return self
-
 
     def get_primitive(self):
         return self._primitive
@@ -137,7 +140,8 @@ class MolecularDynamicsForceConstant:
         return self._fc2
     fc2 = property(get_fc2)
 
-    def run_fc2(self):
+    #@profile
+    def run_fc2(self, is_read_coeff = False, is_write_coeff = False):
         self._fc.set_fc2_irreducible_elements(is_md=True)
         natom = self._num_atom
         tensor2 = self._symmetry.tensor2
@@ -146,16 +150,17 @@ class MolecularDynamicsForceConstant:
         irred_trans2 = self._fc._ifc2_trans
         num_irred_fc2 = self._fc._ifc2_trans.shape[-1]
 
-        self._coeff2 = sparse.lil_matrix((natom * 3 * natom * 3, num_irred_fc2))
+        self._coeff2 = sparse.lil_matrix((natom * natom * 3 * 3, num_irred_fc2))
         for atom1 in np.arange(natom):
-            coeff = tensor2[coeff_index[atom1]]
-            ipair = ifc2_map[atom1]
-            coeff_from_ele = np.einsum('ijk, ikm->ijm', coeff, irred_trans2[ipair])
-            for i in np.arange(3):
-                start = np.ravel_multi_index((atom1, i, 0, 0), dims=(natom, 3, natom, 3))
-                index_range = start + np.arange(natom * 3)
-                coeff_tmp = coeff_from_ele[:, i*3:i*3+3].reshape(-1, num_irred_fc2)
-                self._coeff2[index_range, :] = sparse.lil_matrix(coeff_tmp)
+            coeff = tensor2[coeff_index[atom1]] # shape[natom, 9, 9]
+            ipair = ifc2_map[atom1] # shape [natom]
+            coeff_from_ele = np.einsum('ijk, ikm->ijm', coeff, irred_trans2[ipair]) # shape[natom, 9, nele]
+            start = atom1 * natom * 9
+            index_range = start + np.arange(natom * 9)
+            coeff_tmp = coeff_from_ele.reshape(-1, num_irred_fc2)
+            self._coeff2[index_range, :] = sparse.lil_matrix(coeff_tmp)
+        self._coeff2 = self._coeff2.tocsr()
+        self._fc2_irred = np.zeros(num_irred_fc2, dtype='double')
 
 
 
@@ -167,7 +172,7 @@ class MolecularDynamicsForceConstant:
         self.set_disp_and_forces()
         self.distribute_fc2()
         self.show_residual_forces_fc2()
-        print_irred_fc2(self._fc._pairs_reduced, self._fc._ifc2_ele, self.irred_fc2)
+        print_irred_fc2(self._fc._pairs_reduced, self._fc._ifc2_ele, self._fc2_irred)
         self._step += 1
         if self._converge2:
             print "Equilibrium position found. "
@@ -236,14 +241,14 @@ class MolecularDynamicsForceConstant:
         except ImportError:
             print "Numpy is used to realize Moore-Penrose pseudo inverse"
             irred_uA_pinv = np.linalg.pinv(ddcs2)
-        self.irred_fc2 = np.dot(irred_uA_pinv, forces.flatten())
+        self._fc2_irred = np.dot(irred_uA_pinv, forces.flatten())
 
     def distribute_fc2(self):
         self._fc2 = np.zeros((self._num_atom, self._num_atom, 3, 3))
         for atom1 in np.arange(self._num_atom):
             for atom2 in np.arange(self._num_atom):
                 trans = np.dot(self._coeff2[atom1, atom2], self.irred_trans[self.ifc2_map[atom1, atom2]])
-                self._fc2[atom1, atom2] = np.dot(trans, self.irred_fc2).reshape(3,3)
+                self._fc2[atom1, atom2] = np.dot(trans, self._fc2_irred).reshape(3, 3)
         print "Force constants obtained from MD simulations"
         # show_rotational_invariance(self.force_constants, self.supercell, self.primitive)
         show_drift_force_constants(self.fc2)
@@ -276,7 +281,7 @@ class MolecularDynamicsForceConstant:
 
     def show_residual_forces_fc2(self):
         # force_harm = np.tensordot(self._displacements, self.fc2, axes=((1, 2), (1, 3)))
-        force_harm = np.dot(self._ddcs2, self.irred_fc2)
+        force_harm = np.dot(self._ddcs2, self._fc2_irred)
         resi_force = self._forces - force_harm
         self._forces1 = resi_force[:]
         resi_force_abs = np.sqrt(np.average(resi_force ** 2, axis=0))
@@ -326,7 +331,7 @@ class MolecularDynamicsForceConstant:
         fc = self._fc
         fc.set_third_independents()
         print "Number of irreduble triplets: %d" %len(fc._triplets)
-        fc.get_irreducible_fc3_components_with_spg(is_md=is_md)
+        fc.get_irreducible_fc3_components_with_spg()
         print "spg invariance reduces 3rd IFC to %d"%(len(fc._ifc3_ele))
         print "Calculating fc3 coefficient..."
         fc.get_fc3_coefficients()
@@ -377,10 +382,22 @@ class MolecularDynamicsForceConstant:
     def calculate_fcs(self):
         fc = self._fc
         num_step = len(self._displacements)
-        displacements = self._displacements
-        nele = len(self._fc._ifc2_ele)
-        self.irred_fc2 = np.zeros(nele, dtype='double')
-        forces_fc2 = self._fc.get_fc2_forces(displacements)
+        forces = self._forces.reshape(num_step, -1)
+        displacements = self._displacements.reshape(num_step, -1)
+        nele = len(self._fc2_irred)
+        natom = self._num_atom
+
+        fc2 = self._coeff2.dot(self._fc2_irred).reshape(natom * 3, natom * 3)
+        forces_fc2 = np.dot(displacements, fc2.T)
+        forces_resi = forces_fc2 - forces
+        delta = np.zeros_like(self._fc2_irred)
+        for i in np.arange(num_step):
+            disp = displacements[i]
+            force = forces_resi[i]
+            fd = np.outer(force, disp).flatten()
+            delta[:] += self._coeff2.T.dot(fd).T
+        delta[:] /= num_step * natom * 3
+
 
 
 
@@ -424,12 +441,25 @@ class MolecularDynamicsForceConstant:
         sys.stdout.flush()
 
     #@profile
-    def run_fc3(self):
+    def run_fc3(self, is_read_coeff = False, is_write_coeff = False):
         self.set_fc3_irreducible_components(is_md=True)
-        self._coeff3 = self.fc._coeff3
-        self.ifc3_map = self.fc._ifc3_map
-        self.irred_trans3 = self.fc._ifc3_trans
-        self._num_irred_fc3 = self._fc._ifc3_trans.shape[-1]
+        natom = self._num_atom
+        tensor3 = self._symmetry.tensor3
+        coeff_index = self._fc._coeff3
+        ifc3_map = self._fc._ifc3_map
+        irred_trans3 = self._fc._ifc3_trans
+        num_irred_fc3 = self._fc._ifc3_trans.shape[-1]
+        nfreedom = natom * 3
+        self._coeff3 = sparse.lil_matrix((nfreedom**3, num_irred_fc3))
+        for atom1 in np.arange(natom):
+            coeff = tensor3[coeff_index[atom1]] #shape[natom, natom, 27, 27]
+            ipair = ifc3_map[atom1] # shape[natom, natom, 27, nele]
+            coeff_from_ele = np.einsum('ijkl, ijlm->ijkm', coeff, irred_trans3[ipair])
+            start = atom1 * natom * natom * 27
+            index_range = start + np.arange(natom * natom * 27)
+            coeff_tmp = coeff_from_ele.reshape(-1, num_irred_fc3)
+            self._coeff3[index_range, :] = sparse.lil_matrix(coeff_tmp)
+        self._coeff3 = self._coeff3.tocsr()
 
 
     def set_cutoffs(self, cutoff_radius=None):

@@ -12,6 +12,7 @@ from file_IO import read_fc2_from_hdf5, read_fc3_from_hdf5, write_fc2_hdf5, writ
 from fcmath import mat_dot_product, mat_dense_to_sparse
 from realmd.information import timeit
 import matplotlib.pyplot as plt
+from realmd.memory_profiler import profile
 DEBUG = False
 
 search_directions = np.array(list(np.ndindex((3,3,3)))) - 1
@@ -594,6 +595,7 @@ class ForceConstants():
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='trimming')
 
+    @profile
     def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False, is_md=False):
         if self._symmetry.tensor2 is None:
             self._symmetry.set_tensor2(True)
@@ -686,23 +688,6 @@ class ForceConstants():
             plt.ylabel("Tuned fc2 (eV/A^2)")
             plt.savefig("fc_tune_compare.pdf")
         write_fc2_hdf5(self._fc2, filename='fc2-tuned.hdf5')
-
-    def get_fc2_forces(self, displacements):
-        nele = len(self._ifc2_ele)
-        self._fc2_irred = np.zeros(nele, dtype='double')
-        forces = np.zeros_like(displacements)
-        for atom1 in np.arange(self._num_atom):
-
-            dist = displacements[:]
-            for atom2 in np.arange(self._num_atom):
-                coeff = self._coeff2[atom1, atom2]
-                tensor2 = self._symmetry.tensor2[coeff].reshape(9,9)
-                ele = self._ifc2_map[atom1, atom2] * 9 + np.arange(9) # flattens the shape [natom, 9]
-                fc2_pairs = self._ifc2_trans[ele].dot(self._fc2_irred).reshape(-1, 9) # shape [9]
-                fc2 = tensor2.reshape(-1, 9).dot(fc2_pairs) # shape:[natom*9]
-                fc2 = fc2.reshape(-1, 3, 3)
-                for i in range(3):
-                    forces[:,i] = np.einsum('')
 
 
     def tune_fc3(self):
