@@ -450,15 +450,20 @@ class MolecularDynamicsForceConstant:
         irred_trans3 = self._fc._ifc3_trans
         num_irred_fc3 = self._fc._ifc3_trans.shape[-1]
         nfreedom = natom * 3
-        self._coeff3 = sparse.lil_matrix((nfreedom**3, num_irred_fc3))
+
+        rows = []; columns = []; values = []
         for atom1 in np.arange(natom):
             coeff = tensor3[coeff_index[atom1]] #shape[natom, natom, 27, 27]
             ipair = ifc3_map[atom1] # shape[natom, natom, 27, nele]
             coeff_from_ele = np.einsum('ijkl, ijlm->ijkm', coeff, irred_trans3[ipair])
             start = atom1 * natom * natom * 27
-            index_range = start + np.arange(natom * natom * 27)
+            # index_range = start + np.arange(natom * natom * 27)
             coeff_tmp = coeff_from_ele.reshape(-1, num_irred_fc3)
-            self._coeff3[index_range, :] = sparse.lil_matrix(coeff_tmp)
+            a, b = np.nonzero(coeff_tmp)
+            rows.append(a+start)
+            columns.append(b)
+            values.append(coeff_tmp[a,b])
+        self._coeff3 = sparse.coo_matrix((np.hstack(values), (np.hstack(rows), np.hstack(columns))), shape=(nfreedom ** 3, num_irred_fc3))
         self._coeff3 = self._coeff3.tocsr()
 
 

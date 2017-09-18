@@ -596,7 +596,7 @@ class ForceConstants():
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='trimming')
 
-    @profile
+
     def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False, is_md=False):
         if self._symmetry.tensor2 is None:
             self._symmetry.set_tensor2(True)

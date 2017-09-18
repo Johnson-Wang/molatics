@@ -63,9 +63,13 @@ def get_fc3_coefficients(triplets, symmetry): # returning the fc3 coefficients a
         disp = positions[atom1] - positions[atom1_]
         pos_atom2 = positions - disp  # shape:[natom, 3]
         atom2_ = get_indices_of_atoms(pos_atom2, positions, symmetry.symprec)
-        atom3_ = atom2_
-        ifc_map[atom1, :, :] = ifc_map[atom1_, atom2_, atom3_]
-        coefficients[atom1, :, :] = coefficients[atom1_, atom2_, atom3_]
+        # atom3_ = atom2_
+        for i in np.arange(natom):
+            for j in np.arange(natom):
+                ifc_map[atom1, i, j] = ifc_map[atom1_, atom2_[i], atom2_[j]]
+                coefficients[atom1, i, j] = coefficients[atom1_, atom2_[i], atom2_[j]]
+        # ifc_map[atom1, :, :] = ifc_map[atom1_, atom2_, atom3_]
+        # coefficients[atom1, :, :] = coefficients[atom1_, atom2_, atom3_]
     return coefficients, ifc_map
 
 
