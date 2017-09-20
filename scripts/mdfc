@@ -110,6 +110,9 @@ parser.set_defaults(
     step_range="",
     is_convert_input=False,
     divide=1,
+    steps=1000,
+    lr=0.1,
+    mu=1.0,
     is_disperse=False,
     verbose=False)
 
@@ -210,6 +213,13 @@ parser.add_option("--range", "--step_range", dest="step_range", type="string",
                   help="extract only a range of time steps from the original data, e.g. 1000:2000")
 parser.add_option("-d","--divide",dest="divide", type="int",
                   help="The number of segments after dividing the total chunk of data")
+parser.add_option("--steps", dest="steps", type="int",
+                  help="Maximum steps for gradient descent fitting")
+parser.add_option("--learning_rate", "--lr", dest="lr", type="float",
+                  help="Learning rate for gradient descent fitting")
+parser.add_option("--mu", "--sensitivity", dest="mu", type="float",
+                  help="Sensitivity for compressive sensing (l1 norm coefficient)")
+
 (options, args) = parser.parse_args()
 option_list = parser.option_list
 
@@ -306,9 +316,6 @@ mdfc = MDFC(unitcell,
 
 if settings.get_is_translational_invariance() or settings.get_is_rotational_invariance():
     mdfc.fc.set_smallest_vectors()
-
-mdfc.run_fc2(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
-mdfc.run_fc3(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
 if settings.get_read_fc2() is not None:
     print "##########%s is read and tunned to satisfy symmetry conditions#############" %settings.get_read_fc2()
     print "Precision used for reducing symmetry constraints: %e" %settings.get_precision()
@@ -391,7 +398,10 @@ if settings.get_is_fc3():
     mdfc.run_fc3(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
 
 print "###################Fitting force constants##############################"
-mdfc.calculate_fcs()
+
+mdfc.run_gradient_descent(steps = settings.get_steps(),
+                          lr = settings.get_lr(),
+                          mu = settings.get_mu())
 if log_level > 0:
     if no_error:
         print_end()

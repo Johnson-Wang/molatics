@@ -49,6 +49,9 @@ class Settings:
         self._is_convert_input = False
         self._divide=1
         self._is_disperse=False
+        self._steps = 1000
+        self._lr = 0.1
+        self._mu = 1.0
 
     def set_run_mode(self, run_mode):
         self._run_mode = run_mode
@@ -218,6 +221,24 @@ class Settings:
     def get_divide(self):
         return self._divide
 
+    def set_steps(self, steps):
+        self._steps=steps
+
+    def get_steps(self):
+        return self._steps
+
+    def set_lr(self, lr):
+        self._lr=lr
+
+    def get_lr(self):
+        return self._lr
+
+    def set_mu(self, mu):
+        self._mu=mu
+
+    def get_mu(self):
+        return self._mu
+
 class ConfParser:
     def __init__(self, filename=None, options=None, option_list=None):
         self._confs = {}
@@ -328,6 +349,15 @@ class ConfParser:
 
         if params.has_key('predict_count'):
             self._settings.set_predict_count(params['predict_count'])
+
+        if params.has_key('steps'):
+            self._settings.set_steps(params['steps'])
+
+        if params.has_key('lr'):
+            self._settings.set_lr(params['lr'])
+
+        if params.has_key('mu'):
+            self._settings.set_mu(params['mu'])
 
 
     def read_file(self, filename):
@@ -452,6 +482,17 @@ class ConfParser:
 
             if opt.dest=="predict_count":
                 self._confs["predict_count"]=int(self._options.predict_count)
+
+            if opt.dest=="steps":
+                self._confs["steps"]=int(self._options.steps)
+
+            if opt.dest=="lr":
+                self._confs["lr"]=float(self._options.lr)
+
+            if opt.dest=="mu":
+                self._confs["mu"]=float(self._options.mu)
+
+
 
     def parse_conf(self):
         confs = self._confs
@@ -601,6 +642,15 @@ class ConfParser:
 
             if conf_key == "predict_count":
                 self.set_parameter('predict_count', confs['predict_count'])
+
+            if conf_key == "steps":
+                self.set_parameter('steps', confs['steps'])
+
+            if conf_key == "lr":
+                self.set_parameter('lr', confs['lr'])
+
+            if conf_key == "mu":
+                self.set_parameter('mu', confs['mu'])
 
             if conf_key == "is_convert_input":
                 if confs['is_convert_input'] == ".true.":

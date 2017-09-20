@@ -141,6 +141,12 @@ class Symmetry():
         else: # atoms is an integer
             return self.get_site_symmetry(atoms)
 
+    def get_cartesian_rotation(self, rot_index):
+        lattice = self.cell.get_cell().T
+        rot = self.pointgroup_operations[rot_index]
+        rot_cart = similarity_transformation(lattice, rot)
+        return rot_cart
+
     def set_tensor2(self, is_sparse=False):
         """Get the transformation tensor2 of 2rd harmonic force constants
         Rot.Perm(Phi) = Phi*, where Phi* is the known one.

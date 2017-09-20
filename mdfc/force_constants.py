@@ -1,6 +1,5 @@
 import numpy as np
 import sys
-import scipy
 from itertools import permutations
 from scipy.sparse import dok_matrix, coo_matrix, csr_matrix
 from fc2 import get_fc2_coefficients, get_fc2_spg_invariance,\
@@ -52,27 +51,6 @@ def get_equivalent_smallest_vectors(atom_number_supercell,
     diffsp = differencessp[equivalent_directions]
     relative_scale = np.dot(reduced_bases,np.linalg.inv(primitive_lattice))
     smallest_vectors = np.dot(diffsp, relative_scale)
-
-
-    # for i in (-1, 0, 1):
-    #     for j in (-1, 0, 1):
-    #         for k in (-1, 0, 1):
-    #             # The vector arrow is from the atom in primitive to
-    #             # the atom in supercell cell plus a supercell lattice
-    #             # point. This is related to determine the phase
-    #             # convension when building dynamical matrix.
-    #             diff = s_pos + np.array([i, j, k]) - p_pos
-    #             differences.append(diff)
-    #             vec = np.dot(diff, reduced_bases)
-    #             distances.append(np.linalg.norm(vec))
-
-    # minimum = min(distances)
-    # smallest_vectors = []
-    # for i in range(27):
-    #     if abs(minimum - distances[i]) < symprec:
-    #         relative_scale = np.dot(reduced_bases,
-    #                                 np.linalg.inv(primitive_lattice))
-    #         smallest_vectors.append(np.dot(differences[i], relative_scale))
     if not is_return_index:
         return smallest_vectors
     else:
@@ -94,7 +72,6 @@ class ForceConstants():
         self._lattice = supercell.get_cell().T
         self._cutoff = cutoff
         self._is_disperse=is_disperse
-        self._pairs_reduced = None
         self._pairs_included = None
         self._triplets_included = None
         self._triplets = None
@@ -193,53 +170,6 @@ class ForceConstants():
             if abs(val3) > abs(maxval3):
                 maxval3 = val3
         print ("max drift of %s:" % name), maxval1, maxval2, maxval3
-    #
-    # def show_rotational_invariance_fc3(self, fc3 = None, name='fc3'):
-    #     supercell = self._supercell
-    #     if fc3 is None:
-    #         fc3 = self._fc3_read
-    #     unit_atoms = self._primitive.get_primitive_to_supercell_map()
-    #     natom = supercell.get_number_of_atoms()
-    #     lattice = self._primitive.get_cell()
-    #     eijk = np.zeros((3,3,3), dtype="intc")
-    #     eijk[0,1,2] = eijk[1,2,0] = eijk[2,0,1] = 1
-    #     eijk[0,2,1] = eijk[2,1,0] = eijk[1,0,2] = -1 # epsilon matrix, which is an antisymmetric 3 * 3 * 3 tensor
-    #
-    #     forces = []
-    #     for i, atom1 in enumerate(unit_atoms):
-    #         force_on_atom = np.zeros((3,3,3), dtype=np.float)
-    #         for atom2 in range(natom):
-    #         #     if self._multiplicity is not None:
-    #         #         vectors2 = [self._shortest_vectors[atom2, i, mm] for mm in range(self._multiplicity[atom2, i])]
-    #         #     else:
-    #             vectors2 = get_equivalent_smallest_vectors(atom2,
-    #                                                       atom1,
-    #                                                       supercell,
-    #                                                       lattice,
-    #                                                       self._symprec)
-    #             r_frac2 = np.array(vectors2).sum(axis=0) / len(vectors2)
-    #             r2 = np.dot(r_frac2, lattice)
-    #             t2 = np.dot(eijk, r2)
-    #             for atom3 in range(natom):
-    #                 fc_temp = fc3[i, atom2, atom3]
-    #                 # if self._multiplicity is not None:
-    #                 #     vectors3 = [self._shortest_vectors[atom3, i, mm]
-    #                 #                 for mm in range(self._multiplicity[atom3, i])]
-    #                 # else:
-    #                 vectors3 = get_equivalent_smallest_vectors(atom3,
-    #                                                           atom1,
-    #                                                           supercell,
-    #                                                           lattice,
-    #                                                           self._symprec)
-    #                 r_frac3 = np.array(vectors3).sum(axis=0) / len(vectors3)
-    #                 r3 = np.dot(r_frac3, lattice)
-    #                 t3 = np.dot(eijk, r3)
-    #                 force_on_atom += np.einsum("abc, ib, jc->aij", fc_temp, t2, t3)
-    #         forces.append(force_on_atom)
-    #     forces = np.abs(np.array(forces))
-    #     max_drift = np.max(forces, axis=(0, 2, 3))
-    #     print ("max rotational drift of %s:" % name), max_drift
-
 
     def show_rotational_invariance_fc3(self, fc3 = None, fc2 = None):
         if fc3 is None:
@@ -523,6 +453,7 @@ class ForceConstants():
             else:
                 return self._symmetry.tensor2[self._coeff2].swapaxes(-1, -2)
 
+
     def get_irreducible_fc2_components_with_spg(self):
         if self._symmetry.tensor2 is None:
             self._symmetry.set_tensor2()
@@ -543,7 +474,7 @@ class ForceConstants():
 
     def get_fc2_translational_invariance(self):
         if self._fc2_read is not None:
-            fc2_reduced_pair = np.array([self._fc2_read[pair] for pair in self._pairs_reduced])
+            fc2_reduced_pair = np.array([self._fc2_read[pair] for pair in self._pairs])
             fc2_irr_orig = fc2_reduced_pair.flatten()[self._ifc2_ele]
         irreducible_tmp, transform_tmp = \
             get_fc2_translational_invariance(self._supercell,
@@ -561,7 +492,7 @@ class ForceConstants():
 
     def get_fc2_rotational_invariance(self):
         if self._fc2_read is not None:
-            fc2_reduced_pair = np.array([self._fc2_read[pair] for pair in self._pairs_reduced])
+            fc2_reduced_pair = np.array([self._fc2_read[pair] for pair in self._pairs])
             fc2_irr_orig = fc2_reduced_pair.flatten()[self._ifc2_ele]
 
         irreducible_tmp, transform_tmp = \
@@ -579,7 +510,7 @@ class ForceConstants():
 
     def set_trim_fc2(self):
         if self._fc2_read is not None:
-            fc2_reduced_pair = np.array([self._fc2_read[pair] for pair in self._pairs_reduced])
+            fc2_reduced_pair = np.array([self._fc2_read[pair] for pair in self._pairs])
             fc2_irr_orig = fc2_reduced_pair.flatten()[self._ifc2_ele]
 
         irreducible_tmp, transform_tmp = \
@@ -596,8 +527,7 @@ class ForceConstants():
             fc2_irr_new = fc2_irr_orig[irreducible_tmp]
             check_descrepancy(np.dot(transform_tmp, fc2_irr_new), fc2_irr_orig, info='trimming')
 
-
-    def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False, is_md=False):
+    def set_fc2_irreducible_elements(self, is_trans_inv=False, is_rot_inv=False):
         if self._symmetry.tensor2 is None:
             self._symmetry.set_tensor2(True)
         equivalent_atoms = self._symmetry.mapping
@@ -619,27 +549,24 @@ class ForceConstants():
         print "Point group invariance reduces independent fc2 components to %d" % (self._ifc2_trans.shape[-1])
         print "Calculating transformation coefficients..."
         self.get_fc2_coefficients()
-
-
         sys.stdout.flush()
-        if not is_md:
-            if is_trans_inv:
-                self.get_fc2_translational_invariance()
-                print "Translational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
-            if is_rot_inv:
-                self.get_fc2_rotational_invariance()
-                print "Rotational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
-            if not np.all(self._pairs_included):
-                self.set_trim_fc2()
-                print "Interaction distance cutoff further reduces independent fc2 components to %d" %len(self._ifc2_ele)
-            print "Independent fc2 components calculation completed"
-            if DEBUG:
-                from mdfc.file_IO import read_fc2_from_hdf5
-                fc2 = read_fc2_from_hdf5("fc2.hdf5")
-                fc2_reduced = np.array([fc2[pai] for pai in self._pairs_reduced])
-                fc2p = fc2_reduced.flatten()[self._ifc2_ele]
-                pp = np.einsum('ijkl, ijl-> ijk', self._coeff2, fc2_reduced[self._ifc2_map].reshape(self._num_atom, self._num_atom, 9)).reshape(self._num_atom, self._num_atom, 3, 3)
-            sys.stdout.flush()
+        if is_trans_inv:
+            self.get_fc2_translational_invariance()
+            print "Translational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+        if is_rot_inv:
+            self.get_fc2_rotational_invariance()
+            print "Rotational invariance further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+        if not np.all(self._pairs_included):
+            self.set_trim_fc2()
+            print "Interaction distance cutoff further reduces independent fc2 components to %d" %len(self._ifc2_ele)
+        print "Independent fc2 components calculation completed"
+        if DEBUG:
+            from mdfc.file_IO import read_fc2_from_hdf5
+            fc2 = read_fc2_from_hdf5("fc2.hdf5")
+            fc2_reduced = np.array([fc2[pai] for pai in self._pairs])
+            fc2p = fc2_reduced.flatten()[self._ifc2_ele]
+            pp = np.einsum('ijkl, ijl-> ijk', self._coeff2, fc2_reduced[self._ifc2_map].reshape(self._num_atom, self._num_atom, 9)).reshape(self._num_atom, self._num_atom, 3, 3)
+        sys.stdout.flush()
 
     def tune_fc2(self, is_minimize_relative_error=False, log_level=1):
         self._fc2 = np.zeros_like(self._fc2_read)

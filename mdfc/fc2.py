@@ -2,7 +2,7 @@ __author__ = 'xinjiang'
 from itertools import permutations
 import numpy as np
 from phonopy.harmonic.dynamical_matrix import get_equivalent_smallest_vectors
-from mdfc.fcmath import  gaussian, mat_dot_product
+from mdfc.fcmath import gaussian, mat_dot_product
 
 
 def get_index_of_atom(pos_atom, positions, symprec=1e-6):

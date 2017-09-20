@@ -43,7 +43,6 @@ def read_heat_flux(format="x", filename=None, step_range = slice(None), is_out_s
             filename = "heatflux.dat"
         return read_heat_flux_lammps(filename=filename, step_range=step_range, is_out_step=is_out_step)
 
-
 def read_heat_flux_xyz(filename="heat_flux.out", step_range = slice(None)):
     if not os.path.exists(filename):
         error("file %s does not exist!"%filename)
@@ -84,6 +83,30 @@ def write_fc2_hdf5(fc2, filename="fc2.hdf5"):
     f.create_dataset("fc2", data=fc2)
     f.close()
 
+def write_coefficient_to_hdf5(coefficient, filename):
+    import scipy.sparse as sparse
+    import h5py
+    if not sparse.issparse(coefficient):
+        return
+    if not sparse.isspmatrix_coo(coefficient):
+        coefficient = coefficient.tocoo()
+    f = h5py.File(filename, 'w')
+    f.create_dataset('row', data=coefficient.row)
+    f.create_dataset('col', data=coefficient.col)
+    f.create_dataset('data', data=coefficient.data)
+    f.create_dataset('shape', data=coefficient.shape)
+    f.close()
+
+def read_coefficient_from_hdf5(filename):
+    import scipy.sparse as sparse
+    import h5py
+    f = h5py.File(filename, 'r')
+    row = f['row'][:]
+    col = f['col'][:]
+    data = f['data'][:]
+    shape = f['shape'].value
+    f.close()
+    return sparse.coo_matrix((data, (row, col)), shape=shape)
 class MD_fec(MolecularDynamicsCoordinateVelocity):
     "Force, energy and coordinate information read from MD steps"
     def __init__(self, step_range=slice(None)):
@@ -188,3 +211,7 @@ class MD_fec(MolecularDynamicsCoordinateVelocity):
         o.create_dataset("atom_types",data=self.atom_types)
         o.create_dataset("step_indices",data=self.step_indices)
         o.close()
+
+
+
+
