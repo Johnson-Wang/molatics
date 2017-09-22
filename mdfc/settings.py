@@ -50,8 +50,9 @@ class Settings:
         self._divide=1
         self._is_disperse=False
         self._steps = 1000
-        self._lr = 0.1
+        self._lr = 1.99
         self._mu = 1.0
+        self._diff = 1e-5
 
     def set_run_mode(self, run_mode):
         self._run_mode = run_mode
@@ -239,6 +240,12 @@ class Settings:
     def get_mu(self):
         return self._mu
 
+    def set_fdiff(self, fdiff):
+        self._fdiff=fdiff
+
+    def get_fdiff(self):
+        return self._fdiff
+
 class ConfParser:
     def __init__(self, filename=None, options=None, option_list=None):
         self._confs = {}
@@ -358,6 +365,9 @@ class ConfParser:
 
         if params.has_key('mu'):
             self._settings.set_mu(params['mu'])
+
+        if params.has_key('fdiff'):
+            self._settings.set_fdiff(params['fdiff'])
 
 
     def read_file(self, filename):
@@ -491,6 +501,9 @@ class ConfParser:
 
             if opt.dest=="mu":
                 self._confs["mu"]=float(self._options.mu)
+
+            if opt.dest=="fdiff":
+                self._confs["fdiff"]=float(self._options.fdiff)
 
 
 
@@ -651,6 +664,9 @@ class ConfParser:
 
             if conf_key == "mu":
                 self.set_parameter('mu', confs['mu'])
+
+            if conf_key == "fdiff":
+                self.set_parameter('fdiff', confs['fdiff'])
 
             if conf_key == "is_convert_input":
                 if confs['is_convert_input'] == ".true.":

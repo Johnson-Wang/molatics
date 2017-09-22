@@ -207,8 +207,8 @@ class MolecularDynamicsForceConstant:
                it should not be dragged to the opposite corner"
         if is_normalize:
             print "The displacements are normalized to have unit max displacement"
-            # disp_norm = np.sqrt(np.average(self._displacements ** 2, axis=0)).max()
-            disp_norm = np.average(np.abs(self._displacements), axis=0).max()
+            disp_norm = np.sqrt(np.average(self._displacements ** 2))
+            # disp_norm = np.average(np.abs(self._displacements), axis=0).max()
             self._displacements /= disp_norm
             self._normalize_factor = disp_norm
         self.show_residual_forces()
@@ -333,35 +333,48 @@ class MolecularDynamicsForceConstant:
         self._fc3_irred = 2 * np.dot(pinv, self._forces1.flatten())
         self._forces2 = self._forces1 - 1./2. * np.dot(ddcs, self._fc3_irred) # residual force after 3rd IFC
 
-    def run_gradient_descent(self, steps=1000, lr=0.1, mu=1):
+    def run_gradient_descent(self, steps=1000, fdiff=1e-5, lr=1.99, mu=1):
+        factor = 0. # max_eigval is to normalize the coefficients and forces so that learning rate can be maximized to 1.99
         if self._coeff2 is not None:
             num_irred_fc2 = self._coeff2.shape[-1]
+            A = self._coeff2.T.dot(self._coeff2)
+            eigvals, eigvecs = sparse.linalg.eigsh(A)
+            factor = max(np.sqrt(eigvals.max()), factor)
             self._fc2_irred = np.zeros(num_irred_fc2, dtype='double')
         if self._coeff3 is not None:
             num_irred_fc3 = self._coeff3.shape[-1]
+            A = self._coeff3.T.dot(self._coeff3)
+            eigvals, eigvecs = sparse.linalg.eigsh(A)
+            factor = max(np.sqrt(eigvals.max()), factor)
             self._fc3_irred = np.zeros(num_irred_fc3, dtype='double')
+        # if self._coeff2 is not None:
+        #     self._coeff2 = self._coeff2 / factor
+        # if self._coeff3 is not None:
+        #     self._coeff3 = self._coeff3 / factor
+        # self._forces[:] /= factor
+        lr /= factor
+        is_converge = False
+        residual_force_ave = 0.
+        print "  Step, Resi force (eV/A), Relative ResForce"
         for i in np.arange(steps):
-            print "----%i th iteration"%(i+1)
             residual_force = self.forward_residual_force()
-            print "Residual force (eV/A): %15.5f"%np.abs(residual_force).max()
-            is_converge = True
+            dresidual_force = np.sqrt(np.average(residual_force**2)) - residual_force_ave
+            residual_force_ave += dresidual_force
+            fchange = abs(dresidual_force/residual_force_ave / lr) # force change magnitude
+            print "%6i  %16.10f  %17.10f"%(i+1, residual_force_ave, fchange)
+            if fchange < fdiff:
+                print "Fitting process reached convergence"
+                is_converge = True
+                break
             if self._fc2_irred is not None:
                 delta_fc2 = self.backward_fc2(residual_force, learning_rate=lr)
                 self._fc2_irred[:] += delta_fc2
-                is_converge &= np.abs(delta_fc2).max() < 1e-3
             if self._fc3_irred is not None:
                 delta_fc3 = self.backward_fc3(residual_force, learning_rate=lr)
                 self._fc3_irred[:] += delta_fc3
-                is_converge &= np.abs(delta_fc3).max() < 1e-3
-            if is_converge:
-                print "Fitting process reached convergence"
-                break
         if not is_converge:
             print "Fitting process reached maximum steps without convergence"
         print_irred_fc2(self._fc._pairs, self._fc._ifc2_ele, self._fc2_irred)
-
-
-
 
     def forward_residual_force(self):
         num_step = len(self._displacements)
@@ -396,21 +409,12 @@ class MolecularDynamicsForceConstant:
     def backward_fc3(self, residual_force, learning_rate=0.1):
         num_step = len(self._displacements)
         delta = np.zeros_like(self._fc3_irred)
-        for i in np.arange(num_step):
-            disp = self._displacements[i]
-            force = residual_force[i]
-            fd = np.kron(np.kron(force, disp), disp).flatten()
-            delta[:] += self._coeff3.T.dot(fd).T
+        disp = self._displacements.reshape(num_step, -1)
+        force = residual_force.reshape(num_step, -1)
+        fd = np.einsum('ni, nj, nk -> ijk', force, disp, disp)
+        delta[:] += self._coeff3.T.dot(fd.flatten()).T
         delta[:] /= num_step * self._num_atom * 3
         return delta * learning_rate / 2
-
-
-
-
-
-
-
-
 
     @timeit
     def distribute_fc3(self):
