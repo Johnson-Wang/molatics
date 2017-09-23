@@ -17,16 +17,19 @@ from phonopy.interface.vasp import write_vasp
 import scipy.sparse as sparse
 from realmd.memory_profiler import profile
 
-def print_irred_fc2(pairs_reduced, ifc2_ele, irred_fc2):
+def print_irred_fc2(irred_fc2, pairs=None, ifc2_ele=None):
     tensor = {0:'xx', 1:'xy', 2:'xz', 3:'yx', 4:'yy', 5:'yz', 6:'zx', 7:'zy',8:'zz'}
     print "Irreducible fc2 elements: (eV/A^2)"
-    for i, (ele, fc2) in enumerate(sorted(zip(ifc2_ele, irred_fc2))):
-        direct = tensor[ele % 9]
-        pair = pairs_reduced[ele // 9]
-        if i>1 and i%5 == 0:
-            print
-        print "{:>3d}-{:<3d}({:s}):{:12.4e}".format(pair[0], pair[1], direct, fc2),
-    print
+    if ifc2_ele is not None:
+        for i, (ele, fc2) in enumerate(sorted(zip(ifc2_ele, irred_fc2))):
+            direct = tensor[ele % 9]
+            pair = pairs[ele // 9]
+            if i>1 and i%5 == 0:
+                print
+            print "{:>3d}-{:<3d}({:s}):{:12.4e}".format(pair[0], pair[1], direct, fc2),
+        print
+    else:
+        print irred_fc2
     sys.stdout.flush()
 
 def print_irred_fc3(triplets_reduced, ifc3_ele, irred_fc3):
@@ -167,34 +170,11 @@ class MolecularDynamicsForceConstant:
         self._coeff1 = sparse.coo_matrix(coeff1.reshape(-1, num_ind))
 
     def run_fc2(self, is_read_coeff = False, is_write_coeff = False):
-        if is_read_coeff:
-            print "Reading harmonic coefficients from hdf5 file"
-            self._coeff2 = read_coefficient_from_hdf5('fc2_coefficients.hdf5')
-        else:
-            self._fc.set_fc2_irreducible_elements()
-            natom = self._num_atom
-            tensor2 = self._symmetry.tensor2
-            coeff_index = self._fc._coeff2
-            ifc2_map = self._fc._ifc2_map
-            irred_trans2 = self._fc._ifc2_trans
-            num_irred_fc2 = self._fc._ifc2_trans.shape[-1]
-            self._coeff2 = sparse.lil_matrix((natom * natom * 3 * 3, num_irred_fc2))
-            for atom1 in np.arange(natom):
-                coeff = tensor2[coeff_index[atom1]] # shape[natom, 9, 9]
-                ipair = ifc2_map[atom1] # shape [natom]
-                coeff_from_ele = np.einsum('ijk, ikm->ijm', coeff, irred_trans2[ipair]) # shape[natom, 9, nele]
-                start = atom1 * natom * 9
-                index_range = start + np.arange(natom * 9)
-                coeff_tmp = coeff_from_ele.reshape(-1, num_irred_fc2)
-                self._coeff2[index_range, :] = sparse.lil_matrix(coeff_tmp)
-            if is_write_coeff:
-                write_coefficient_to_hdf5(self._coeff2, 'fc2_coefficients.hdf5')
-                print "Harmonic coefficients written to hdf5 file"
-        self._coeff2 = self._coeff2.tocsr()
+        self._coeff2 = self._fc.get_fc2_coefficients_sparse(is_read_coeff, is_write_coeff)
         self._num_irred_fc2 = self._coeff2.shape[-1]
 
     #@profile
-    def init_disp_and_forces(self, coordinates=None, forces=None, is_normalize=True):
+    def init_disp_and_forces(self, coordinates=None, forces=None, is_normalize=False):
         self._forces = - forces # the negative sign enforces F = Phi .dot. U
         self._resi_force = np.average(forces, axis=0)
         self._resi_force_abs = np.zeros_like(self._resi_force)
@@ -374,7 +354,14 @@ class MolecularDynamicsForceConstant:
                 self._fc3_irred[:] += delta_fc3
         if not is_converge:
             print "Fitting process reached maximum steps without convergence"
-        print_irred_fc2(self._fc._pairs, self._fc._ifc2_ele, self._fc2_irred)
+
+        if self._fc2_irred is not None:
+            self._fc2_irred[:] *= self._normalize_factor
+            print_irred_fc2(self._fc2_irred, self._fc._pairs, self._fc._ifc2_ele)
+            self._fc2 = self._coeff2.dot(self._fc2_irred).reshape(self._num_atom, self._num_atom, 3, 3)
+            print "FC2 extraction process from MD has completed"
+            print "    with least square error: %f (eV/A^2)" %residual_force_ave
+            write_fc2_hdf5(self._fc2, filename='fc2-md.hdf5')
 
     def forward_residual_force(self):
         num_step = len(self._displacements)
@@ -455,34 +442,7 @@ class MolecularDynamicsForceConstant:
 
     #@profile
     def run_fc3(self, is_read_coeff = False, is_write_coeff = False):
-        if is_read_coeff:
-            print "Reading fc3 coefficients from hdf5 file"
-            self._coeff3 = read_coefficient_from_hdf5('fc3_coefficients.hdf5')
-        else:
-            self.set_fc3_irreducible_components()
-            natom = self._num_atom
-            tensor3 = self._symmetry.tensor3
-            coeff_index = self._fc._coeff3
-            ifc3_map = self._fc._ifc3_map
-            irred_trans3 = self._fc._ifc3_trans
-            num_irred_fc3 = self._fc._ifc3_trans.shape[-1]
-            nfreedom = natom * 3
-            rows = []; columns = []; values = []
-            for atom1 in np.arange(natom):
-                coeff = tensor3[coeff_index[atom1]] #shape[natom, natom, 27, 27]
-                ipair = ifc3_map[atom1] # shape[natom, natom, 27, nele]
-                coeff_from_ele = np.einsum('ijkl, ijlm->ijkm', coeff, irred_trans3[ipair])
-                start = atom1 * natom * natom * 27
-                # index_range = start + np.arange(natom * natom * 27)
-                coeff_tmp = coeff_from_ele.reshape(-1, num_irred_fc3)
-                a, b = np.where(np.abs(coeff_tmp)>self._symprec)
-                rows.append(a+start)
-                columns.append(b)
-                values.append(coeff_tmp[a,b])
-            self._coeff3 = sparse.coo_matrix((np.hstack(values), (np.hstack(rows), np.hstack(columns))), shape=(nfreedom ** 3, num_irred_fc3))
-            if is_write_coeff:
-                write_coefficient_to_hdf5(self._coeff3, 'fc3_coefficients.hdf5')
-                print "Fc3 coefficients written to hdf5 file"
+        self._fc.get_fc3_coefficients_sparse(is_read_coeff)
         self._coeff3 = self._coeff3.tocsr()
         self._num_irred_fc3 = self._coeff3.shape[-1]
 

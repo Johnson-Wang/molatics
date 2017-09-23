@@ -111,7 +111,7 @@ parser.set_defaults(
     is_convert_input=False,
     divide=1,
     steps=1000,
-    lr=0.1,
+    lr=1.99,
     mu=1.0,
     is_disperse=False,
     fdiff=1e-5,
@@ -307,35 +307,40 @@ else:
     factor = 1
 
 mdfc = MDFC(unitcell,
-          settings.get_supercell_matrix(),
-          factor=factor,
-          symprec=options.symprec,
-          cutoff_radius=settings.get_cutoff_radius(),
-          cutoff_force=settings.get_cutoff_residual_force(),
-          cutoff_disp=settings.get_cutoff_disp(),
-          is_symmetry=settings.get_is_symmetry(),
-          divide=settings.get_divide(),
-          count=settings.get_predict_coun(),
-          is_translational_invariance=settings.get_is_translational_invariance(),
-          is_rotational_invariance=settings.get_is_rotational_invariance(),
-          is_disperse = settings.get_is_disperse(),
-          precision=settings.get_precision(),
-          log_level=log_level,
-          is_hdf5=settings.get_is_hdf5())
+            settings.get_supercell_matrix(),
+            factor=factor,
+            symprec=options.symprec,
+            cutoff_radius=settings.get_cutoff_radius(),
+            cutoff_force=settings.get_cutoff_residual_force(),
+            cutoff_disp=settings.get_cutoff_disp(),
+            is_symmetry=settings.get_is_symmetry(),
+            divide=settings.get_divide(),
+            count=settings.get_predict_coun(),
+            is_translational_invariance=settings.get_is_translational_invariance(),
+            is_rotational_invariance=settings.get_is_rotational_invariance(),
+            is_disperse = settings.get_is_disperse(),
+            precision=settings.get_precision(),
+            log_level=log_level,
+            is_hdf5=settings.get_is_hdf5())
 
 if settings.get_is_translational_invariance() or settings.get_is_rotational_invariance():
     mdfc.fc.set_smallest_vectors()
-if settings.get_read_fc2() is not None:
-    print "##########%s is read and tunned to satisfy symmetry conditions#############" %settings.get_read_fc2()
+
+if log_level >= 1:
     print "Precision used for reducing symmetry constraints: %e" %settings.get_precision()
     if settings.get_is_translational_invariance():
         print "Translational invariance: ON"
+        mdfc.fc.set_is_trans_inv(True)
     else:
         print "Translational invariance: OFF"
     if settings.get_is_rotational_invariance():
         print "Rotational invariance: ON"
+        mdfc.fc.set_is_rot_inv(True)
     else:
         print "Rotational invariance: OFF"
+
+if settings.get_read_fc2():
+    print "##########%s is read and tunned to satisfy symmetry conditions#############" % settings.get_read_fc2()
     fc = mdfc.fc
     if settings.get_supercell_matrix_orig() is not None:
         if not np.all(np.array(settings.get_supercell_matrix_orig()) <= np.array(settings.get_supercell_matrix)):
@@ -344,9 +349,9 @@ if settings.get_read_fc2() is not None:
     print "##########Checking the invariance conditions for the given force constants#############"
     show_drift_force_constants(fc.get_fc2_read())
     show_rotational_invariance(fc.get_fc2_read(), supercell=mdfc.supercell, log_level = log_level)
-    fc.set_fc2_irreducible_elements(is_trans_inv=settings.get_is_translational_invariance(),
-                                    is_rot_inv=settings.get_is_rotational_invariance())
-    fc.tune_fc2(log_level=log_level)
+    fc.tune_fc2(log_level=log_level,
+                is_read_coeff=options.is_read_coeff,
+                is_write_coeff=options.is_write_coeff)
     print "##########After tunning, checking the invariance conditions for the tuned force constants#############"
     show_drift_force_constants(fc.get_fc2())
     show_rotational_invariance(fc.get_fc2(), supercell=mdfc.supercell, log_level=log_level)
@@ -362,9 +367,9 @@ if settings.get_read_fc3() is not None:
     fc.show_drift_fc3()
     if settings.get_read_fc2():
         fc.show_rotational_invariance_fc3()
-    fc.set_fc3_irreducible_components(is_trans_inv=settings.get_is_translational_invariance(),
-                                      is_rot_inv=settings.get_is_rotational_invariance())
-    fc.tune_fc3()
+    fc.tune_fc3(log_level=log_level,
+                is_read_coeff=options.is_read_coeff,
+                is_write_coeff=options.is_write_coeff)
     fc.show_drift_fc3(fc3=fc._fc3)
     if fc._fc2 is not None:
         fc.show_rotational_invariance_fc3(fc3=fc._fc3, fc2=fc._fc2)
@@ -396,17 +401,28 @@ if md.atom_forces == None:
     print_error_message("Force information not found! Exiting")
     sys.exit(1)
 if log_level:
-    print "-------------------------------Calculating Force Constants------------------------------------------"
+    print "-------------------------------Calculating Force Constants------------------------------------------",
+    print """
++------------------------+---------------+------------------+---------------+---------------+
+| Fitting method         | Learning rate | Force difference |  Max steps    |       mu      |
++========================+===============+==================+===============+===============+
+| Gradient descent       |  %8.2f     |    %10.2e    | %7d       |     %5.2f     |
++------------------------+---------------+------------------+---------------+---------------+
+"""%(settings.get_lr(),
+     settings.get_fdiff(),
+     settings.get_steps(),
+     settings.get_mu())
+
 mdfc.init_disp_and_forces(coordinates = md.atom_coordinates, forces = md.atom_forces)
 
 if settings.get_is_fc2():
-    print "##################Reducing total number of fc2#############################"
+    print "**********Reducing total number of fc2**********"
     mdfc.run_fc2(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
 if settings.get_is_fc3():
-    print "##################Reducing total number of fc3#############################"
+    print "**********Reducing total number of fc3**********"
     mdfc.run_fc3(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
 
-print "###################Fitting force constants##############################"
+print "**********Fitting force constants**********"
 
 mdfc.run_gradient_descent(steps = settings.get_steps(),
                           fdiff = settings.get_fdiff(),

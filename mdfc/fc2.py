@@ -96,7 +96,9 @@ def get_fc2_spg_invariance(pairs, symmetry):
         indeps.append(independent)
     return indeps, np.hstack(trans)
 
-def get_fc2_translational_invariance(supercell, trans, coeff, ifc_map, precision=1e-6):
+def get_fc2_translational_invariance(symmetry, trans, coefficients, ifc_map, precision=1e-6):
+    supercell = symmetry.cell
+    tensor2 = symmetry.tensor2
     natom = supercell.get_number_of_atoms()
     unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
     num_irred = trans.shape[-1]
@@ -105,7 +107,8 @@ def get_fc2_translational_invariance(supercell, trans, coeff, ifc_map, precision
         ti_transform = np.zeros((9, num_irred))
         for atom2 in np.arange(natom):
             irred_doublet = ifc_map[atom1, atom2]
-            ti_transform += np.dot(coeff[atom1, atom2], trans[irred_doublet])
+            coeff = tensor2[coefficients[atom1, atom2]]
+            ti_transform += np.dot(coeff, trans[irred_doublet])
         for k in range(9):
             if not (np.abs(ti_transform[k])< precision).all():
                 # ti_transform_row = ti_transform[k] / np.abs(ti_transform[k]).max()
@@ -155,14 +158,15 @@ def get_trim_fc2(supercell,
     CC, transform, independent = gaussian(np.array(ti_transforms), precision)
     return independent, transform
 
-def get_fc2_rotational_invariance(supercell,
+def get_fc2_rotational_invariance(symmetry,
                                   trans,
                                   coeff,
                                   ifc_map,
-                                  symprec,
                                   precision=1e-8,
                                   is_Huang=True): #Gazis-Wallis invariance
-    positions = supercell.get_scaled_positions()
+    supercell = symmetry.cell
+    symprec = symmetry.symprec
+    tensor2 = symmetry.tensor2
     unit_atoms = np.unique(supercell.get_supercell_to_unitcell_map())
     natom = supercell.get_number_of_atoms()
     num_irred2 = trans.shape[-1]
@@ -174,7 +178,8 @@ def get_fc2_rotational_invariance(supercell,
     for i, patom_num in enumerate(unit_atoms):
         force = np.zeros((27, num_irred2), dtype='double')
         for j in range(natom):
-            fc_temp = np.dot(coeff[patom_num, j], trans[ifc_map[patom_num, j]]).reshape(3,3,-1)
+            coeff_tmp = tensor2[coeff[patom_num, j]]
+            fc_temp = np.dot(coeff_tmp, trans[ifc_map[patom_num, j]]).reshape(3,3,-1)
             vectors = get_equivalent_smallest_vectors(j,
                                                       patom_num,
                                                       supercell,

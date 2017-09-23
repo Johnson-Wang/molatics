@@ -150,7 +150,7 @@ class Symmetry():
     def set_tensor2(self, is_sparse=False):
         """Get the transformation tensor2 of 2rd harmonic force constants
         Rot.Perm(Phi) = Phi*, where Phi* is the known one.
-        Tensor3.Phi = Phi* --> Phi = Phi*.Tensor3
+        Tensor2.Phi = Phi* --> Phi = Tensor2.T.Phi*
         """
         lattice = self.cell.get_cell().T
         self.tensor2 = np.zeros((len(self.pointgroup_operations)*2, 9, 9), dtype='double')
@@ -160,13 +160,6 @@ class Symmetry():
             tensor2 = np.kron(rot_cart, rot_cart).reshape(3,3,9)
             for j, perm in enumerate(permutations('ij')):
                 self.tensor2[i+j*nopes] = np.einsum("ijk->%s%sk"%perm, tensor2).reshape(9,9).T
-            # self.tensor2[i] = tensor2.T
-            # self.tensor2[i+nopes] = tensor2.reshape(3,3,9).swapaxes(0,1).reshape(9,9).T
-        # if is_sparse:
-            # non_zero = np.nonzero(self.tensor2)
-            # transform_sparse = coo_matrix((self.tensor2, non_zero), shape=self.tensor2.shape)
-            # transform_sparse = csr_matrix(self.tensor2)
-            # self.tensor2 = csr_matrix(self.tensor2.reshape(-1, 81))
 
     def set_tensor3(self, is_sparse=False):
         """Get the transformation tensor3 of 3rd anharmonic force constants
