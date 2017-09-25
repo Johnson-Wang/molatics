@@ -51,7 +51,7 @@ class Settings:
         self._is_disperse=False
         self._steps = 1000
         self._lr = 1.99
-        self._mu = 1.0
+        self._mu = None
         self._diff = 1e-5
 
     def set_run_mode(self, run_mode):
@@ -500,7 +500,7 @@ class ConfParser:
                 self._confs["lr"]=float(self._options.lr)
 
             if opt.dest=="mu":
-                self._confs["mu"]=float(self._options.mu)
+                self._confs["mu"] = self._options.mu
 
             if opt.dest=="fdiff":
                 self._confs["fdiff"]=float(self._options.fdiff)

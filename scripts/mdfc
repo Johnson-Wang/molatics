@@ -112,7 +112,7 @@ parser.set_defaults(
     divide=1,
     steps=1000,
     lr=1.99,
-    mu=1.0,
+    mu=None,
     is_disperse=False,
     fdiff=1e-5,
     verbose=False)
@@ -217,7 +217,7 @@ parser.add_option("-d","--divide",dest="divide", type="int",
 parser.add_option("--steps", dest="steps", type="int",
                   help="Maximum steps for gradient descent fitting")
 parser.add_option("--learning_rate", "--lr", dest="lr", type="float",
-                  help="Learning rate for gradient descent fitting (Recommended to be 1.99)")
+                  help="Learning rate for gradient descent fitting (Recommended 1.99, but sometimes higher values also yield convergence)")
 parser.add_option("--mu", "--sensitivity", dest="mu", type="float",
                   help="Sensitivity for compressive sensing (l1 norm coefficient)")
 parser.add_option("--fdiff", dest="fdiff", type="float",
@@ -406,7 +406,7 @@ if log_level:
 +------------------------+---------------+------------------+---------------+---------------+
 | Fitting method         | Learning rate | Force difference |  Max steps    |       mu      |
 +========================+===============+==================+===============+===============+
-| Gradient descent       |  %8.2f     |    %10.2e    | %7d       |     %5.2f     |
+| Gradient descent       |  %8.2f     |    %10.2e    | %7d       |     %5.2s     |
 +------------------------+---------------+------------------+---------------+---------------+
 """%(settings.get_lr(),
      settings.get_fdiff(),
@@ -424,10 +424,13 @@ if settings.get_is_fc3():
 
 print "**********Fitting force constants**********"
 
-mdfc.run_gradient_descent(steps = settings.get_steps(),
-                          fdiff = settings.get_fdiff(),
-                          lr = settings.get_lr(),
-                          mu = settings.get_mu())
+mdfc.run_conjugate_gradient(steps=settings.get_steps(),
+                            fdiff = settings.get_fdiff())
+#
+# mdfc.run_gradient_descent(steps = settings.get_steps(),
+#                           fdiff = settings.get_fdiff(),
+#                           lr = settings.get_lr(),
+#                           mu = settings.get_mu())
 if log_level > 0:
     if no_error:
         print_end()

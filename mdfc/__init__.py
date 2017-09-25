@@ -32,20 +32,33 @@ def print_irred_fc2(irred_fc2, pairs=None, ifc2_ele=None):
         print irred_fc2
     sys.stdout.flush()
 
-def print_irred_fc3(triplets_reduced, ifc3_ele, irred_fc3):
-    tensor = {0:'xxx', 1:'xxy', 2:'xxz', 3:'xyx', 4:'xyy', 5:'xyz', 6:'xzx', 7:'xzy',8:'xzz',
-              9:'yxx', 10:'yxy', 11:'yxz', 12:'yyx', 13:'yyy', 14:'yyz', 15:'yzx', 16:'yzy',17:'yzz',
-              18:'zxx', 19:'zxy', 20:'zxz', 21:'zyx', 22:'zyy', 23:'zyz', 24:'zzx', 25:'zzy',26:'zzz'}
-    print "Irreducible fc3 elements: (eV/A^3)"
-    for i, (ele, fc3) in enumerate(sorted(zip(ifc3_ele, irred_fc3))):
-        direct = tensor[ele % 27]
-        triplet = triplets_reduced[ele // 27]
-        if i>1 and i%5 == 0:
-            print
-        print "{:>3d}{:-^5d}{:<3d}({:s}):{:12.4e}".format(triplet[0], triplet[1], triplet[2], direct, fc3),
-        # print "%3d-%3d-%-3d(%s): %11.4e |" %(triplet[0], triplet[1], triplet[2], direct, fc3),
-    print
+def print_irred_fc3(irred_fc3, triplets_reduced=None, ifc3_ele=None):
+    if ifc3_ele is not None:
+        tensor = {0:'xxx', 1:'xxy', 2:'xxz', 3:'xyx', 4:'xyy', 5:'xyz', 6:'xzx', 7:'xzy',8:'xzz',
+                  9:'yxx', 10:'yxy', 11:'yxz', 12:'yyx', 13:'yyy', 14:'yyz', 15:'yzx', 16:'yzy',17:'yzz',
+                  18:'zxx', 19:'zxy', 20:'zxz', 21:'zyx', 22:'zyy', 23:'zyz', 24:'zzx', 25:'zzy',26:'zzz'}
+        print "Irreducible fc3 elements: (eV/A^3)"
+        for i, (ele, fc3) in enumerate(sorted(zip(ifc3_ele, irred_fc3))):
+            direct = tensor[ele % 27]
+            triplet = triplets_reduced[ele // 27]
+            if i>1 and i%5 == 0:
+                print
+            print "{:>3d}{:-^5d}{:<3d}({:s}):{:12.4e}".format(triplet[0], triplet[1], triplet[2], direct, fc3),
+            # print "%3d-%3d-%-3d(%s): %11.4e |" %(triplet[0], triplet[1], triplet[2], direct, fc3),
+        print
+    else:
+        print irred_fc3
     sys.stdout.flush()
+
+def shrink(y, alpha):
+    "shrink(y, alpha) = sign(y) * max(|y|-alpha), 0)"
+    y_prime = np.abs(y) - alpha
+    try:
+        y_prime[np.where(y_prime < 0)] = 0
+        y_prime *= np.sign(y)
+    except TypeError: # if y is only a number
+        y_prime = 0 if y_prime < 0 else y_prime * np.sign(y_prime)
+    return y_prime
 
 class MolecularDynamicsForceConstant:
     def __init__(self,
@@ -174,7 +187,7 @@ class MolecularDynamicsForceConstant:
         self._num_irred_fc2 = self._coeff2.shape[-1]
 
     #@profile
-    def init_disp_and_forces(self, coordinates=None, forces=None, is_normalize=False):
+    def init_disp_and_forces(self, coordinates=None, forces=None, is_normalize=True):
         self._forces = - forces # the negative sign enforces F = Phi .dot. U
         self._resi_force = np.average(forces, axis=0)
         self._resi_force_abs = np.zeros_like(self._resi_force)
@@ -313,26 +326,93 @@ class MolecularDynamicsForceConstant:
         self._fc3_irred = 2 * np.dot(pinv, self._forces1.flatten())
         self._forces2 = self._forces1 - 1./2. * np.dot(ddcs, self._fc3_irred) # residual force after 3rd IFC
 
-    def run_gradient_descent(self, steps=1000, fdiff=1e-5, lr=1.99, mu=1):
-        factor = 0. # max_eigval is to normalize the coefficients and forces so that learning rate can be maximized to 1.99
+
+    def run_conjugate_gradient(self, steps=1000, fdiff=1e-5):
+        """
+        Description
+        -----------
+        Solve the fitting equation Ax = b (A^T.A.x = A^T.b) with conjugate gradient method.
+        Parameters
+        ----------
+        steps: maximum running steps
+        fdiff: the convergence criterion
+        Returns
+        -------
+        1d numpy.array x such that Ax = b
+        """
+        factor = self.coefficients_normalization()
+        residual_force = self.forward_residual_force()
+        displacements = self._displacements.reshape(-1, self._num_atom * 3)
+        r = self.fc2_outer(residual_force)
+        p = r.copy()
+        r_norm = np.dot(r, r)
+        print "  Step, Resi force (eV/A), Relative ResForce"
+        is_converge = False
+        for i in np.arange(steps):
+            phi = self._coeff2.dot(p).reshape(self._num_atom, self._num_atom, 3, 3)
+            phi = phi.swapaxes(1, 2).reshape(-1, self._num_atom*3)
+            f = displacements.dot(phi.T).reshape(-1, self._num_atom, 3)
+            outer = self.fc2_outer(f)
+            alpha = r_norm / np.dot(p, outer)
+            self._fc2_irred += alpha * p
+            rforce = self.forward_residual_force()
+            rforce_ave = np.sqrt(np.average(rforce**2))
+            f_change = np.sqrt(np.average(f ** 2)) / rforce_ave
+            print "%6i  %16.10f  %17.10f" % (i + 1, rforce_ave * factor, f_change)
+            if f_change < fdiff:
+                print "Fitting process reached convergence"
+                is_converge = True
+                break
+            r -= alpha * outer # r(i) -> r(i+1)
+            beta = np.dot(r, r) / r_norm
+            r_norm = np.dot(r, r)
+            p = beta * p + r
+
+        if not is_converge:
+            print "Fitting process reached maximum steps without convergence"
+
+        if self._fc2_irred is not None:
+            self._fc2_irred[:] /= self._normalize_factor
+            print_irred_fc2(self._fc2_irred, self._fc._pairs, self._fc._ifc2_ele)
+            self._fc2 = self._coeff2.dot(self._fc2_irred).reshape(self._num_atom, self._num_atom, 3, 3)
+            write_fc2_hdf5(self._fc2, filename='fc2-md.hdf5')
+
+        if self._fc3_irred is not None:
+            self._fc3_irred[:] /= self._normalize_factor ** 2
+            print_irred_fc3(self._fc3_irred, self._fc._triplets, self._fc._ifc3_ele)
+            self._fc3 = self._coeff3.dot(self._fc3_irred).reshape(self._num_atom, self._num_atom, self._num_atom, 3, 3, 3)
+            write_fc3_hdf5(self._fc3, filename='fc3-md.hdf5')
+        print "Force constants extraction process from MD has completed"
+        print "    with least square error: %f (eV/A^2)" %(rforce_ave*factor)
+
+    def coefficients_normalization(self):
+        max_eigval = 0. # max_eigval is to normalize the coefficients and forces so that learning rate can be maximized to 1.99
         if self._coeff2 is not None:
             num_irred_fc2 = self._coeff2.shape[-1]
-            A = self._coeff2.T.dot(self._coeff2)
+            A = self._coeff2.T.dot(self._coeff2) / self._num_atom / 3
+            A *= np.average(self._displacements ** 2)
             eigvals, eigvecs = sparse.linalg.eigsh(A)
-            factor = max(np.sqrt(eigvals.max()), factor)
+            max_eigval = max(eigvals.max(), max_eigval)
             self._fc2_irred = np.zeros(num_irred_fc2, dtype='double')
         if self._coeff3 is not None:
             num_irred_fc3 = self._coeff3.shape[-1]
-            A = self._coeff3.T.dot(self._coeff3)
+            A = self._coeff3.T.dot(self._coeff3) / self._num_atom / 3
             eigvals, eigvecs = sparse.linalg.eigsh(A)
-            factor = max(np.sqrt(eigvals.max()), factor)
+            max_eigval = max(eigvals.max(), max_eigval)
             self._fc3_irred = np.zeros(num_irred_fc3, dtype='double')
-        # if self._coeff2 is not None:
-        #     self._coeff2 = self._coeff2 / factor
-        # if self._coeff3 is not None:
-        #     self._coeff3 = self._coeff3 / factor
-        # self._forces[:] /= factor
-        lr /= factor
+        factor = np.sqrt(max_eigval)
+        if self._coeff2 is not None:
+            self._coeff2 = self._coeff2 / factor
+        if self._coeff3 is not None:
+            self._coeff3 = self._coeff3 / factor
+        self._forces[:] /= factor
+        return factor
+
+
+    def run_gradient_descent(self, steps=1000, fdiff=1e-5, lr=1.99, mu=None):
+        factor = self.coefficients_normalization()
+        if mu is not None:
+            mu /= factor ** 2
         is_converge = False
         residual_force_ave = 0.
         print "  Step, Resi force (eV/A), Relative ResForce"
@@ -340,8 +420,8 @@ class MolecularDynamicsForceConstant:
             residual_force = self.forward_residual_force()
             dresidual_force = np.sqrt(np.average(residual_force**2)) - residual_force_ave
             residual_force_ave += dresidual_force
-            fchange = abs(dresidual_force/residual_force_ave / lr) # force change magnitude
-            print "%6i  %16.10f  %17.10f"%(i+1, residual_force_ave, fchange)
+            fchange = abs(dresidual_force/residual_force_ave) # force change magnitude
+            print "%6i  %16.10f  %17.10f"%(i+1, residual_force_ave * factor, fchange)
             if fchange < fdiff:
                 print "Fitting process reached convergence"
                 is_converge = True
@@ -349,19 +429,31 @@ class MolecularDynamicsForceConstant:
             if self._fc2_irred is not None:
                 delta_fc2 = self.backward_fc2(residual_force, learning_rate=lr)
                 self._fc2_irred[:] += delta_fc2
+                if mu is not None:
+                    self._fc2_irred = shrink(self._fc2_irred, lr * mu) # compressive sensing
             if self._fc3_irred is not None:
                 delta_fc3 = self.backward_fc3(residual_force, learning_rate=lr)
                 self._fc3_irred[:] += delta_fc3
+                if mu is not None:
+                    self._fc3_irred = shrink(self._fc3_irred, lr * mu)  # compressive sensing
+
+
         if not is_converge:
             print "Fitting process reached maximum steps without convergence"
 
         if self._fc2_irred is not None:
-            self._fc2_irred[:] *= self._normalize_factor
+            self._fc2_irred[:] /= self._normalize_factor
             print_irred_fc2(self._fc2_irred, self._fc._pairs, self._fc._ifc2_ele)
             self._fc2 = self._coeff2.dot(self._fc2_irred).reshape(self._num_atom, self._num_atom, 3, 3)
-            print "FC2 extraction process from MD has completed"
-            print "    with least square error: %f (eV/A^2)" %residual_force_ave
             write_fc2_hdf5(self._fc2, filename='fc2-md.hdf5')
+
+        if self._fc3_irred is not None:
+            self._fc3_irred[:] /= self._normalize_factor ** 2
+            print_irred_fc3(self._fc3_irred, self._fc._triplets, self._fc._ifc3_ele)
+            self._fc3 = self._coeff3.dot(self._fc3_irred).reshape(self._num_atom, self._num_atom, self._num_atom, 3, 3, 3)
+            write_fc3_hdf5(self._fc3, filename='fc3-md.hdf5')
+        print "Force constants extraction process from MD has completed"
+        print "    with least square error: %f (eV/A^2)" %(residual_force_ave*factor)
 
     def forward_residual_force(self):
         num_step = len(self._displacements)
@@ -383,15 +475,25 @@ class MolecularDynamicsForceConstant:
 
     def backward_fc2(self, residual_force, learning_rate=0.1):
         num_step = len(self._displacements)
-        natom = self._num_atom
         delta = np.zeros_like(self._fc2_irred)
         for i in np.arange(num_step):
             disp = self._displacements[i]
             force = residual_force[i]
             fd = np.kron(force, disp).flatten()
             delta[:] += self._coeff2.T.dot(fd).T
-        delta[:] /= num_step * natom * 3
+        delta[:] /= num_step * self._num_atom * 3
         return delta * learning_rate
+
+    def fc2_outer(self, residual_force):
+        num_step = len(self._displacements)
+        delta = np.zeros_like(self._fc2_irred)
+        for i in np.arange(num_step):
+            disp = self._displacements[i]
+            force = residual_force[i]
+            fd = np.kron(force, disp).flatten()
+            delta[:] += self._coeff2.T.dot(fd).T
+        delta[:] /= num_step * self._num_atom * 3
+        return delta
 
     def backward_fc3(self, residual_force, learning_rate=0.1):
         num_step = len(self._displacements)
