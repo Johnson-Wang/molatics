@@ -220,6 +220,8 @@ parser.add_option("--learning_rate", "--lr", dest="lr", type="float",
                   help="Learning rate for gradient descent fitting (Recommended 1.99, but sometimes higher values also yield convergence)")
 parser.add_option("--mu", "--sensitivity", dest="mu", type="float",
                   help="Sensitivity for compressive sensing (l1 norm coefficient)")
+parser.add_option("--lambda", dest="lam", type="float",
+                  help="Sensitivity for compressive sensing (l1 norm coefficient)")
 parser.add_option("--fdiff", dest="fdiff", type="float",
                   help="force difference (eV/A) for setting the convergence criterion")
 parser.add_option("--gd", dest="gradient_descent",
@@ -424,13 +426,8 @@ if settings.get_is_fc3():
 
 print "**********Fitting force constants**********"
 
-mdfc.run_conjugate_gradient(steps=settings.get_steps(),
-                            fdiff = settings.get_fdiff())
-#
-# mdfc.run_gradient_descent(steps = settings.get_steps(),
-#                           fdiff = settings.get_fdiff(),
-#                           lr = settings.get_lr(),
-#                           mu = settings.get_mu())
+mdfc.fit_fc2(steps=settings.get_steps(),
+             fdiff=settings.get_fdiff())
 if log_level > 0:
     if no_error:
         print_end()

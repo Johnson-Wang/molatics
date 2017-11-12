@@ -326,13 +326,14 @@ class MolecularDynamicsForceConstant:
         self._fc3_irred = 2 * np.dot(pinv, self._forces1.flatten())
         self._forces2 = self._forces1 - 1./2. * np.dot(ddcs, self._fc3_irred) # residual force after 3rd IFC
 
-
-    def run_conjugate_gradient(self, steps=1000, fdiff=1e-5):
+    def fit_fc2(self, steps=1000, fdiff=1e-5):
         """
         Description
         -----------
         Solve the fitting equation Ax = b (A^T.A.x = A^T.b) with conjugate gradient method.
         Parameters
+        This algorithm is directly copied from:
+        https://en.wikipedia.org/wiki/Conjugate_gradient_method#The_resulting_algorithm
         ----------
         steps: maximum running steps
         fdiff: the convergence criterion
@@ -340,10 +341,16 @@ class MolecularDynamicsForceConstant:
         -------
         1d numpy.array x such that Ax = b
         """
-        factor = self.coefficients_normalization()
+        factor = self.coefficients_normalization() # A /= sqrt(max_eigenvalue)
         residual_force = self.forward_residual_force()
         displacements = self._displacements.reshape(-1, self._num_atom * 3)
-        r = self.fc2_outer(residual_force)
+        r = self.fc2_outer(residual_force) # A^T .dot. delta_f
+        is_Bregman = True
+        mu = 0; lam = 0
+        d = np.zeros_like(self._fc2_irred)
+        b = np.zeros_like(self._fc2_irred)
+        if is_Bregman:
+            r += mu * lam * (d - b + mu * self._fc2_irred)
         p = r.copy()
         r_norm = np.dot(r, r)
         print "  Step, Resi force (eV/A), Relative ResForce"
@@ -353,6 +360,8 @@ class MolecularDynamicsForceConstant:
             phi = phi.swapaxes(1, 2).reshape(-1, self._num_atom*3)
             f = displacements.dot(phi.T).reshape(-1, self._num_atom, 3)
             outer = self.fc2_outer(f)
+            if is_Bregman:
+                outer += lam * mu ** 2 * p
             alpha = r_norm / np.dot(p, outer)
             self._fc2_irred += alpha * p
             rforce = self.forward_residual_force()
@@ -367,6 +376,9 @@ class MolecularDynamicsForceConstant:
             beta = np.dot(r, r) / r_norm
             r_norm = np.dot(r, r)
             p = beta * p + r
+        if is_Bregman:
+            d = shrink(mu * self._fc2_irred+b, 1/lam)
+            b += mu * self._fc2_irred - d
 
         if not is_converge:
             print "Fitting process reached maximum steps without convergence"
@@ -485,6 +497,7 @@ class MolecularDynamicsForceConstant:
         return delta * learning_rate
 
     def fc2_outer(self, residual_force):
+        "f.d"
         num_step = len(self._displacements)
         delta = np.zeros_like(self._fc2_irred)
         for i in np.arange(num_step):

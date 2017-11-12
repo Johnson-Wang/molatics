@@ -5,7 +5,7 @@
 
 Welcome to molatics's documentation!
 ====================================
-**mdfc** is an open-source program for inter-atomic force extraction from molecular dynamics results
+**mdfc** is an open-source program for inter-atomic force extraction from molecular dynamics results using compressive sensing technique
 
 **mdos** is an open-source program for phonon density of states (DOS) calculation from molecular dynamics
 using velocity autocorrelation
@@ -16,7 +16,8 @@ using velocity autocorrelation
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
-
+   equations
+   symmetry
 
 
 Indices and tables
