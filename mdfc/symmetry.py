@@ -9,7 +9,7 @@ from mdfc.fcmath import similarity_transformation
 class Symmetry():
     def __init__(self, cell, symprec=1e-6):
         self.cell = cell
-        self.positions = self.cell.get_scaled_positions()
+        self.positions = self.cell.get_scaled_positions() #get relative positions of atoms
         self.symprec = symprec
         self.rot_inv = None
         self.rot_mult = None

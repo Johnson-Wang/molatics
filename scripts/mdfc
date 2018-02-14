@@ -417,8 +417,10 @@ if log_level:
 
 mdfc.init_disp_and_forces(coordinates = md.atom_coordinates, forces = md.atom_forces)
 
-if settings.get_is_fc2():
+
+if settings.get_is_fc2() or settings.get_is_fc3():
     print "**********Reducing total number of fc2**********"
+    mdfc.run_fc1()
     mdfc.run_fc2(is_read_coeff = options.is_read_coeff, is_write_coeff = options.is_write_coeff)
 if settings.get_is_fc3():
     print "**********Reducing total number of fc3**********"
@@ -426,6 +428,9 @@ if settings.get_is_fc3():
 
 print "**********Fitting force constants**********"
 
+# mdfc.run_gradient_descent(steps=settings.get_steps(),
+#                           fdiff=settings.get_fdiff(),
+#                           lr=0.5)
 mdfc.fit_fc2(steps=settings.get_steps(),
              fdiff=settings.get_fdiff())
 if log_level > 0:

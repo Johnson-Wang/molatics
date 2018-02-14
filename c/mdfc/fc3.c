@@ -329,6 +329,24 @@ int get_fc3_coefficients_triplet(double coefficients[27][27],
   return ifc_mapping;
 }
 
+void calculate_force_from_fc3(double *force,
+                              const double *fc3, //shape[natom, 3, natom, 3, natom, 3]
+                              const double *disps, // shape [nstep, natom, 3]
+                              const int natom,
+                              const int nstep){
+
+  const int natom3 = natom * 3;
+  int i, j, k, l;
+  for (i=0; i < natom3 * nstep; i++)
+    force[i]=0;
+  for (i=0; i < nstep; i++){
+    for (j=0; j < natom3; j++)
+      for (k=0; k < natom3; k++)
+        for (l=0; l < natom3; l++)
+           force[i*natom3+j] += fc3[j*natom3*natom3+k*natom3+l] * disps[i*natom3+k] * disps[i*natom3+l];
+  }
+}
+
 void rearrange_disp_fc3(double *ddcs, 
 			const double *disps, 
 			const double *coeff, 

@@ -469,7 +469,6 @@ class ForceConstants():
             else:
                 return self._symmetry.tensor2[self._coeff2].swapaxes(-1, -2)
 
-
     def get_irreducible_fc2_components_with_spg(self):
         if self._symmetry.tensor2 is None:
             self._symmetry.set_tensor2()

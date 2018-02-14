@@ -13,6 +13,7 @@ static PyObject * py_get_fc3_coefficients_triplet(PyObject *self, PyObject *args
 static PyObject * py_rearrange_disp_fc3(PyObject *self, PyObject *args);
 static PyObject * py_rearrange_disp_fc2(PyObject *self, PyObject *args);
 static PyObject * py_test(PyObject *self, PyObject *args);
+static PyObject * py_calculate_force_from_fc3(PyObject *self, PyObject *args);
 static PyObject * py_gaussian(PyObject *self, PyObject *args);
 static PyMethodDef functions[] = {
   {"pinv", py_phonopy_pinv, METH_VARARGS, "Pseudo-inverse using Lapack dgesvd"},
@@ -22,6 +23,7 @@ static PyMethodDef functions[] = {
   {"get_fc3_coefficients", py_get_fc3_coefficients, METH_VARARGS, "Obtain the transformation matrix from irreducible fc3 (<=27) triplets to the whole"},
   {"get_fc3_coefficients_triplet", py_get_fc3_coefficients_triplet, METH_VARARGS, "Obtain the transformation matrix from irreducible fc3 (<=27) triplets to a given triplet"},
   {"get_fc3_spg_invariance", py_get_fc3_spg_invariance, METH_VARARGS, "Obtain the transformation matrix from irreducible fc3 (<=27) components to full (27) for each irreducible fc3 unit"},
+  {"calculate_force_from_fc3", py_calculate_force_from_fc3, METH_VARARGS, "Calculate forces given fc3"},
   {"rearrange_disp_fc3", py_rearrange_disp_fc3, METH_VARARGS, "Rearrange the displacements as the coefficients of fc3"},
   {"rearrange_disp_fc2", py_rearrange_disp_fc2, METH_VARARGS, "Rearrange the displacements as the coefficients of fc2"},
   {NULL, NULL, 0, NULL}
@@ -336,7 +338,22 @@ static PyObject * py_gaussian(PyObject *self, PyObject *args)
   free_MatArbiLenINT(transform);
   return PyInt_FromLong((long) num_independent);
 }
-
+static PyObject * py_calculate_force_from_fc3(PyObject *self, PyObject *args){
+  PyArrayObject *py_force, *py_disps, *py_fc3;
+  if (!PyArg_ParseTuple(args, "OOO",
+    &py_force,
+    &py_fc3,
+    &py_disps)) {
+    return NULL;
+  }
+  double *forces = (double*) py_force->data;
+  const double *disps = (double*) py_disps->data;
+  const double *fc3 = (double*) py_fc3->data;
+  const natom = py_fc3->dimensions[0];
+  const nstep = py_disps->dimensions[0];
+  calculate_force_from_fc3(force, fc3, disps, natom, nstep);
+  Py_RETURN_NONE
+}
 static PyObject * py_rearrange_disp_fc3(PyObject *self, PyObject *args)
 {
   PyArrayObject *py_ddcs, *py_disps, *py_coeff, *py_trans, *py_ifcmap;

@@ -45,6 +45,11 @@ int get_fc3_coefficients_triplet(double coefficients[27][27],
                                   const F3ArbiLenINT *mappings3,
                                   const F3ArbiLenINT *mapope3,
                                   const double symprec);
+void calculate_force_from_fc3(double *force,
+                              const double *fc3, //shape[natom, 3, natom, 3, natom, 3]
+                              const double *disps, // shape [nstep, natom, 3]
+                              const int natom,
+                              const int nstep);
 void rearrange_disp_fc3(double *ddcs, 
 			const double *disps, 
 			const double *coeff, 

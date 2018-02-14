@@ -101,14 +101,16 @@ class MolecularDynamicsForceConstant:
         self._precision = precision
         self._is_hdf5 = is_hdf5
         self._count = count
-        self._positions = self.supercell.get_scaled_positions()
+        self._positions = self.supercell.get_scaled_positions() #relative positions
         self._lattice = self.supercell.get_cell()
         self._num_atom = len(self._positions)
         self._normalize_factor = 1.
         self._coeff2 = None
         self._coeff3 = None
+        self._num_irred_fc1 = 0
         self._num_irred_fc2 = 0
         self._num_irred_fc3 = 0
+
         self._converge2 = False
         self._fc = ForceConstants(self.supercell,
                                   self.primitive,
@@ -157,30 +159,33 @@ class MolecularDynamicsForceConstant:
     fc2 = property(get_fc2)
 
     def run_fc1(self):
+        """Get the transformation coefficients from the irreducible fc1 to the whole matrix.
+        Actually this is equivalent to the mapping process from the irreducible displacements"""
         symmetry = self.symmetry
         unique, indices = np.unique(symmetry.mapping, return_inverse=True)
-        independents = []
-        transforms = []
-        for atom in unique:
-            site_symmetry = symmetry.get_site_symmetry(atom)
-            rots_cart = np.array([symmetry.get_cartesian_rotation(r) for r in site_symmetry])
-            invariant_transforms = rots_cart - np.eye(3)
-            CC, transform, independent = gaussian(invariant_transforms.reshape(-1, 3))
-            transforms.append(transform)
-            independents.append(independent)
-        len_ind = [len(t) for t in independents]
-        num_ind = sum(len_ind)
+        # independents = []
+        # transforms = []
+        # for atom in unique:
+        #     site_symmetry = symmetry.get_site_symmetry(atom)
+        #     rots_cart = np.array([symmetry.get_cartesian_rotation(r) for r in site_symmetry])
+        #     invariant_transforms = rots_cart - np.eye(3)
+        #     CC, transform, independent = gaussian(invariant_transforms.reshape(-1, 3))
+        #     transforms.append(transform)
+        #     independents.append(independent)
+        # len_ind = [len(t) for t in independents]
+        # num_ind = sum(len_ind)
 
+        num_ind = 3 * len(unique)
         coeff1 = np.zeros((self._num_atom, 3, num_ind), dtype='double')
         for i in np.arange(self._num_atom):
             rot_index = symmetry.rotations[symmetry.mapping_operations[i]]
             rot_inverse = symmetry.rot_inverse(rot_index)
             rot_inverse_cart = symmetry.get_cartesian_rotation(rot_inverse)
             atom_ = indices[i]
-            trans = np.dot(rot_inverse_cart, transforms[atom_])
-            ind_indices = np.arange(len_ind[atom_]) + sum(len_ind[:atom_])
-            coeff1[i, :, ind_indices] = trans
+            trans = rot_inverse_cart
+            coeff1[i, :, atom_*3:atom_*3+3] = trans
         self._coeff1 = sparse.coo_matrix(coeff1.reshape(-1, num_ind))
+        self._num_irred_fc1 = self._coeff1.shape[-1]
 
     def run_fc2(self, is_read_coeff = False, is_write_coeff = False):
         self._coeff2 = self._fc.get_fc2_coefficients_sparse(is_read_coeff, is_write_coeff)
@@ -326,6 +331,7 @@ class MolecularDynamicsForceConstant:
         self._fc3_irred = 2 * np.dot(pinv, self._forces1.flatten())
         self._forces2 = self._forces1 - 1./2. * np.dot(ddcs, self._fc3_irred) # residual force after 3rd IFC
 
+
     def fit_fc2(self, steps=1000, fdiff=1e-5):
         """
         Description
@@ -334,6 +340,11 @@ class MolecularDynamicsForceConstant:
         Parameters
         This algorithm is directly copied from:
         https://en.wikipedia.org/wiki/Conjugate_gradient_method#The_resulting_algorithm
+
+        The split Bregman algorithm for compressive sensing can be traced from
+        Nelson, L. J., Hart, G. L. W., Zhou, F. & Ozolins, V.
+        Compressive sensing as a paradigm for building physics models. Phys. Rev. B 87, 035125 (2013).
+        
         ----------
         steps: maximum running steps
         fdiff: the convergence criterion
@@ -345,7 +356,7 @@ class MolecularDynamicsForceConstant:
         residual_force = self.forward_residual_force()
         displacements = self._displacements.reshape(-1, self._num_atom * 3)
         r = self.fc2_outer(residual_force) # A^T .dot. delta_f
-        is_Bregman = True
+        is_Bregman = False
         mu = 0; lam = 0
         d = np.zeros_like(self._fc2_irred)
         b = np.zeros_like(self._fc2_irred)
@@ -358,15 +369,31 @@ class MolecularDynamicsForceConstant:
         for i in np.arange(steps):
             phi = self._coeff2.dot(p).reshape(self._num_atom, self._num_atom, 3, 3)
             phi = phi.swapaxes(1, 2).reshape(-1, self._num_atom*3)
-            f = displacements.dot(phi.T).reshape(-1, self._num_atom, 3)
-            outer = self.fc2_outer(f)
+            f2 = displacements.dot(phi.T).reshape(-1, self._num_atom, 3)
+            outer = self.fc2_outer(f2)
+
+            phi3 = self._coeff3.dot(p).reshape(self._num_atom, self._num_atom, self._num_atom, 3, 3, 3)
+            f3 = np.zeros_like(f2)
+            _mdfc.calculate_force_from_fc3(f3, phi3, displacements)
+            phi3 = phi3.swapaxes(2, 4).swapaxes(2,3).swapaxes(1,2)
+            phi3.reshape(self._num_atom, 3, self._num_atom, 3, -1).dot()
+
+            # ddcs = np.zeros((num_step, self._num_atom, 3, num_irred),
+            #                 dtype="double")  # displacements  rearrangement as the coefficients of fc3
+            # mdfc.rearrange_disp_fc3(ddcs,
+            #                         self._displacements,
+            #                         coeff,
+            #                         trans,
+            #                         ifcmap,
+            #                         1e-6)
+
             if is_Bregman:
                 outer += lam * mu ** 2 * p
             alpha = r_norm / np.dot(p, outer)
             self._fc2_irred += alpha * p
             rforce = self.forward_residual_force()
             rforce_ave = np.sqrt(np.average(rforce**2))
-            f_change = np.sqrt(np.average(f ** 2)) / rforce_ave
+            f_change = np.sqrt(np.average(f2 ** 2)) / rforce_ave
             print "%6i  %16.10f  %17.10f" % (i + 1, rforce_ave * factor, f_change)
             if f_change < fdiff:
                 print "Fitting process reached convergence"
@@ -395,7 +422,7 @@ class MolecularDynamicsForceConstant:
             self._fc3 = self._coeff3.dot(self._fc3_irred).reshape(self._num_atom, self._num_atom, self._num_atom, 3, 3, 3)
             write_fc3_hdf5(self._fc3, filename='fc3-md.hdf5')
         print "Force constants extraction process from MD has completed"
-        print "    with least square error: %f (eV/A^2)" %(rforce_ave*factor)
+        print "    with least square error: %f2 (eV/A^2)" %(rforce_ave*factor)
 
     def coefficients_normalization(self):
         max_eigval = 0. # max_eigval is to normalize the coefficients and forces so that learning rate can be maximized to 1.99
@@ -421,7 +448,7 @@ class MolecularDynamicsForceConstant:
         return factor
 
 
-    def run_gradient_descent(self, steps=1000, fdiff=1e-5, lr=1.99, mu=None):
+    def run_gradient_descent(self, steps=1000, fdiff=1e-5, lr=1.99, mu=None, batch_size=100):
         factor = self.coefficients_normalization()
         if mu is not None:
             mu /= factor ** 2
@@ -449,7 +476,6 @@ class MolecularDynamicsForceConstant:
                 if mu is not None:
                     self._fc3_irred = shrink(self._fc3_irred, lr * mu)  # compressive sensing
 
-
         if not is_converge:
             print "Fitting process reached maximum steps without convergence"
 
@@ -468,6 +494,7 @@ class MolecularDynamicsForceConstant:
         print "    with least square error: %f (eV/A^2)" %(residual_force_ave*factor)
 
     def forward_residual_force(self):
+        """ f'=T.V: T=(displacements), v=(force constants), in addition, the fc1 need to be scaled"""
         num_step = len(self._displacements)
         forces = self._forces.reshape(num_step, -1)
         displacements = self._displacements.reshape(num_step, -1)
@@ -497,16 +524,26 @@ class MolecularDynamicsForceConstant:
         return delta * learning_rate
 
     def fc2_outer(self, residual_force):
-        "f.d"
+        "f.d, in addition, the fc1 need to be scaled"
         num_step = len(self._displacements)
-        delta = np.zeros_like(self._fc2_irred)
+        if self._fc2_irred is not None:
+            delta2 = np.zeros_like(self._fc2_irred)
+        if self._fc3_irred is not None:
+            delta3 = np.zeros_like(self._fc3_irred)
         for i in np.arange(num_step):
             disp = self._displacements[i]
             force = residual_force[i]
             fd = np.kron(force, disp).flatten()
-            delta[:] += self._coeff2.T.dot(fd).T
-        delta[:] /= num_step * self._num_atom * 3
-        return delta
+            if self._coeff2 is not None:
+                delta2[:] += self._coeff2.T.dot(fd).T
+            if self._coeff3 is not None:
+                fd = np.kron(fd, disp).flatten()
+                delta3[:] += self._coeff3.T.dot(fd).T
+        if self._fc2_irred is not None:
+            delta2[:] /= num_step * self._num_atom * 3
+        if self._fc3_irred is not None:
+            delta3[:] /= num_step * self._num_atom * 3 # not sure
+        return delta2
 
     def backward_fc3(self, residual_force, learning_rate=0.1):
         num_step = len(self._displacements)
